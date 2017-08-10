@@ -5,8 +5,14 @@
 #
 # Реализовать утилиту для чтения файлов и просмотра листингов директорий.
 
-import fat
+import fat_reader
 
+DEBUG_MODE = True
+
+
+def debug(message):
+    if DEBUG_MODE:
+        print(message)
 
 
 def main():
@@ -14,9 +20,9 @@ def main():
     size = 0
     try:
         bs = fi.read()
-        f = fat.Fat32(bs)
+        f = fat_reader.Fat32Reader(bs)
+        d = f.get_root_directory()
         size = len(bs)
-        print(str(fat.bytes_to_int_lbe(bs, 0xb, 2)))
     finally:
         fi.close()
     print("Hello, size = " + str(size))

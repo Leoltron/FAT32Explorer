@@ -1,4 +1,5 @@
 # !/usr/bin/env python3
+from main import debug
 
 READ_ONLY = 0x01
 HIDDEN = 0x02
@@ -35,3 +36,28 @@ class File:
     @property
     def name(self):
         return self.long_name if self.long_name else self.short_name
+
+    def __eq__(self, other):
+        self._eq_debug(other)
+        return self.short_name == other.short_name \
+            and self.long_name == other.long_name \
+            and self.content == other.content \
+            and self.attributes == other.attributes \
+            and self.create_datetime == other.create_datetime \
+            and self.last_open_date == other.last_open_date \
+            and self.change_datetime == other.change_datetime \
+            and self.size_bytes == other.size_bytes
+
+    def _eq_debug(self, other):
+        eq_debug(self.short_name, other.short_name)
+        eq_debug(self.long_name, other.long_name)
+        eq_debug(self.content, other.content)
+        eq_debug(self.attributes, other.attributes)
+        eq_debug(self.create_datetime, other.create_datetime)
+        eq_debug(self.last_open_date, other.last_open_date)
+        eq_debug(self.change_datetime, other.change_datetime)
+        eq_debug(self.size_bytes, other.size_bytes)
+
+
+def eq_debug(one, other):
+    debug(str(one) + (" == " if one == other else" != ") + str(other))
