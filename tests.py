@@ -76,7 +76,8 @@ class BytesParserTests(unittest.TestCase):
 class FatReaderStaticTests(unittest.TestCase):
     def test_file_parse(self):
         file_expected = fs_objects.File('SHORT.TXT', '', None, fs_objects.ARCHIVE,
-                                        datetime.datetime(day=29, month=7, year=2017, hour=14, minute=53, second=16),
+                                        datetime.datetime(day=29, month=7, year=2017, hour=14, minute=53, second=16,
+                                                          microsecond=76000),
                                         datetime.date(day=29, month=7, year=2017),
                                         datetime.datetime(day=14, month=7, year=2017, hour=20, minute=24, second=10),
                                         1699)

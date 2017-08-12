@@ -40,17 +40,17 @@ class File:
     def __eq__(self, other):
         self._eq_debug(other)
         return self.short_name == other.short_name \
-            and self.long_name == other.long_name \
-            and self.content == other.content \
-            and self.attributes == other.attributes \
-            and self.create_datetime == other.create_datetime \
-            and self.last_open_date == other.last_open_date \
-            and self.change_datetime == other.change_datetime \
-            and self.size_bytes == other.size_bytes
+               and self.long_name == other.long_name \
+               and self.content == other.content \
+               and self.attributes == other.attributes \
+               and self.create_datetime == other.create_datetime \
+               and self.last_open_date == other.last_open_date \
+               and self.change_datetime == other.change_datetime \
+               and self.size_bytes == other.size_bytes
 
     def _eq_debug(self, other):
-        eq_debug(self.short_name, other.short_name)
-        eq_debug(self.long_name, other.long_name)
+        eq_debug('\"' + self.short_name + '\"', '\"' + other.short_name + '\"')
+        eq_debug('\"' + self.long_name + '\"', '\"' + other.long_name + '\"')
         eq_debug(self.content, other.content)
         eq_debug(self.attributes, other.attributes)
         eq_debug(self.create_datetime, other.create_datetime)

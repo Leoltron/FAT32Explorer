@@ -69,11 +69,10 @@ class Fat32Reader:
     def __init__(self, fat_image):
         self._read_fat32_boot_sector(BytesParser(fat_image))
         self._parse_fat_values(fat_image)
-
-        self.data_area = self.sector_slice(fat_image, self.reserved_sectors + self.fat_amount * self.sectors_per_fat)
+        self._parse_data_area(fat_image)
 
     def _parse_fat_values(self, fat_image):
-        active_fat = self.get_active_fat(fat_image)
+        active_fat = self._get_active_fat(fat_image)
         fat_parser = BytesParser(active_fat)
 
         self.fat_values = list()
@@ -81,7 +80,7 @@ class Fat32Reader:
             self.fat_values.append(format_fat_address(fat_parser.parse_int_unsigned(i, BYTES_PER_FAT32_ENTRY)))
 
     def _parse_data_area(self, fat_image):
-        start = self.sectors_to_bytes(self.reserved_sectors + self.fat_amount * self.sectors_per_fat)
+        start = self._sectors_to_bytes(self.reserved_sectors + self.fat_amount * self.sectors_per_fat)
         self.data = list()
         bytes_per_cluster = self.bytes_per_sector * self.sectors_per_cluster
         for cluster_start in range(start, len(fat_image) - bytes_per_cluster, bytes_per_cluster):
@@ -109,25 +108,26 @@ class Fat32Reader:
         if self.total_sectors == 0:
             self.total_sectors = bytes_parser.parse_int_unsigned(0x20, 4)
 
-    def sectors_to_bytes(self, sectors):
+    def _sectors_to_bytes(self, sectors):
         return self.bytes_per_sector * sectors
 
-    def sector_slice(self, data, start_sector, end_sector=None):
+    def _sector_slice(self, data, start_sector, end_sector=None):
         if end_sector is None:
-            return data[self.sectors_to_bytes(start_sector)]
+            return data[self._sectors_to_bytes(start_sector)]
         else:
-            return data[self.sectors_to_bytes(start_sector):self.sectors_to_bytes(end_sector)]
+            return data[self._sectors_to_bytes(start_sector):self._sectors_to_bytes(end_sector)]
 
-    def cluster_slice(self, data, start_cluster, end_cluster):
-        return self.sector_slice(data, start_cluster * self.sectors_per_cluster, end_cluster * self.sectors_per_cluster)
+    def _cluster_slice(self, data, start_cluster, end_cluster):
+        return self._sector_slice(data, start_cluster * self.sectors_per_cluster,
+                                  end_cluster * self.sectors_per_cluster)
 
-    def get_active_fat(self, fat_image):
-        return self.get_fat(fat_image, self.active_fat_number)
+    def _get_active_fat(self, fat_image):
+        return self._get_fat(fat_image, self.active_fat_number)
 
-    def get_fat(self, fat_image, fat_number):
+    def _get_fat(self, fat_image, fat_number):
         start = self.reserved_sectors + fat_number * self.sectors_per_fat
         end = start + self.sectors_per_fat
-        return self.sector_slice(fat_image, start, end)
+        return self._sector_slice(fat_image, start, end)
 
     def get_root_directory(self):
         """
@@ -140,6 +140,8 @@ class Fat32Reader:
         long_file_name_buffer = ""
         for start in range(0, len(data) - BYTES_PER_DIR_ENTRY, BYTES_PER_DIR_ENTRY):
             entry_bytes = data[start:start + BYTES_PER_DIR_ENTRY]
+            if entry_bytes[0] == b'\x05' or entry_bytes[0] == b'\xE5':
+                continue
             entry_parser = BytesParser(entry_bytes)
             attributes = entry_parser.parse_int_unsigned(11, 1)
             if attributes == fs_objects.LFN:  # Long file name entry
@@ -167,16 +169,19 @@ class Fat32Reader:
         return content
 
     def get_data(self, cluster):
-        return self.data[cluster]
+        return self.data[cluster-2]
 
     def get_data_from_cluster_chain(self, first_cluster):
         current_cluster = first_cluster
         data = bytes()
+        cluster_chain = str(first_cluster)
         while True:
-            data += self.data[current_cluster]
+            data += self.get_data(current_cluster)
             try:
                 current_cluster = self.get_next_file_cluster(current_cluster)
+                cluster_chain += "-" + str(current_cluster)
             except EOFError:
+                debug("Cluster chain: "+cluster_chain)
                 return data
 
     def get_next_file_cluster(self, prev_cluster):
@@ -204,7 +209,7 @@ class BytesParser:
         return datetime.combine(date=parsed_date, time=parsed_time)
 
     def parse_time(self, start):
-        bin_string = bin(self.parse_int_unsigned(start, 2, byteorder="big"))[2:].zfill(16)
+        bin_string = self.parse_bin_str(start, 2)
 
         debug("parse_time: " + bin_string)
         debug("hour: " + bin_string[0:5])
@@ -232,7 +237,7 @@ class BytesParser:
         return date(day=day, month=month, year=year)
 
     def parse_bin_str(self, start_byte, length_bytes):
-        return bin(self.parse_int_unsigned(start_byte, length_bytes, byteorder="big"))[2:].zfill(8 * length_bytes)
+        return bin(self.parse_int_unsigned(start_byte, length_bytes, byteorder="little"))[2:].zfill(8 * length_bytes)
 
     def hex_readable(self, start, length):
         import binascii
