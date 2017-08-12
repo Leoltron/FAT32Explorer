@@ -14,7 +14,6 @@ class File:
     def __init__(self,
                  short_name,
                  long_name,
-                 content,
                  attributes,
                  create_datetime,
                  last_open_date,
@@ -22,7 +21,6 @@ class File:
                  size_bytes):
         self.short_name = short_name
         self.long_name = long_name
-        self.content = content
         self.attributes = attributes
         self.create_datetime = create_datetime
         self.last_open_date = last_open_date

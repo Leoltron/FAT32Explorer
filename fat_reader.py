@@ -15,9 +15,9 @@ def format_fat_address(address):
 
 
 def parse_file_first_cluster_number(entry_parser):
-    cluster_number = (entry_parser.parse_int_unsigned(0 + 20, 2) << 16 + entry_parser.parse_int_unsigned(0 + 26, 2))
-    cluster_number = format_fat_address(cluster_number)
-    return cluster_number
+    cluster_number = (entry_parser.parse_int_unsigned(20, 2) << 16) + \
+                     entry_parser.parse_int_unsigned(26, 2)
+    return format_fat_address(cluster_number)
 
 
 def parse_creation_datetime(entry_parser):
@@ -28,12 +28,16 @@ def parse_creation_datetime(entry_parser):
 
 
 def get_lfn_part(entry_bytes):
-    utf8_chars_pos = itertools.chain(range(1, 11, 2), range(14, 26, 2), range(28, 32, 2))
+    debug("get_lfn_part: ")
+    debug("\thex: " + BytesParser(entry_bytes).hex_readable(0,
+                                                            BYTES_PER_DIR_ENTRY))
+    utf8_chars_pos = itertools.chain(range(1, 11, 2), range(14, 26, 2),
+                                     range(28, 32, 2))
     lfn_part = ""
     for pos in utf8_chars_pos:
         char = entry_bytes[pos:pos + 2]
         if char != b'\x00\x00' and char != b'\xFF\xFF':
-            lfn_part += char.decode("utf-8")
+            lfn_part += char.decode("utf_16")
         else:
             break
     return lfn_part
@@ -43,9 +47,11 @@ def parse_file_info(entry_parser, long_file_name_buffer=""):
     attributes = entry_parser.parse_int_unsigned(11, 1)
     is_directory = bool(attributes & fs_objects.DIRECTORY)
 
-    name_part = entry_parser.parse_string(0, 8, "ascii", "strict").strip()
-    extension_part = entry_parser.parse_string(8, 3, "ascii", "strict").strip()
-    short_name = name_part + (('.' + extension_part) if not is_directory else "")
+    name_part = entry_parser.parse_string(0, 8, "cp866", "strict").strip()
+    extension_part = entry_parser.parse_string(8, 3, "cp866",
+                                               "strict").strip()
+    short_name = name_part + (
+        ('.' + extension_part) if not is_directory else "")
     debug("\tshort_name: " + short_name)
 
     creation_datetime = parse_creation_datetime(entry_parser)
@@ -57,12 +63,29 @@ def parse_file_info(entry_parser, long_file_name_buffer=""):
 
     return fs_objects.File(short_name,
                            long_file_name_buffer,
-                           None,
                            attributes,
                            creation_datetime,
                            last_access_date,
                            last_modification_datetime,
                            file_size_bytes)
+
+
+def debug_file_attributes(attributes):
+    debug(hex(attributes) + " -> attributes:")
+    if attributes & fs_objects.READ_ONLY:
+        debug("\tREAD_ONLY")
+    if attributes & fs_objects.HIDDEN:
+        debug("\tHIDDEN")
+    if attributes & fs_objects.SYSTEM:
+        debug("\tSYSTEM")
+    if attributes & fs_objects.VOLUME_ID:
+        debug("\tVOLUME_ID")
+    if attributes & fs_objects.DIRECTORY:
+        debug("\tDIRECTORY")
+    if attributes & fs_objects.ARCHIVE:
+        debug("\tARCHIVE")
+    if attributes == fs_objects.LFN:
+        debug("\tLFN")
 
 
 class Fat32Reader:
@@ -76,15 +99,21 @@ class Fat32Reader:
         fat_parser = BytesParser(active_fat)
 
         self.fat_values = list()
-        for i in range(0, len(active_fat) - BYTES_PER_FAT32_ENTRY, BYTES_PER_FAT32_ENTRY):
-            self.fat_values.append(format_fat_address(fat_parser.parse_int_unsigned(i, BYTES_PER_FAT32_ENTRY)))
+        for i in range(0, len(active_fat) - BYTES_PER_FAT32_ENTRY,
+                       BYTES_PER_FAT32_ENTRY):
+            self.fat_values.append(format_fat_address(
+                fat_parser.parse_int_unsigned(i, BYTES_PER_FAT32_ENTRY)))
 
     def _parse_data_area(self, fat_image):
-        start = self._sectors_to_bytes(self.reserved_sectors + self.fat_amount * self.sectors_per_fat)
+        start = self._sectors_to_bytes(self.reserved_sectors
+                                       + self.fat_amount
+                                       * self.sectors_per_fat)
         self.data = list()
         bytes_per_cluster = self.bytes_per_sector * self.sectors_per_cluster
-        for cluster_start in range(start, len(fat_image) - bytes_per_cluster, bytes_per_cluster):
-            self.data.append(fat_image[cluster_start:cluster_start + bytes_per_cluster])
+        for cluster_start in range(start, len(fat_image) - bytes_per_cluster,
+                                   bytes_per_cluster):
+            self.data.append(fat_image[cluster_start:cluster_start +
+                                                     bytes_per_cluster])
 
     def _read_fat32_boot_sector(self, bytes_parser):
         self._parse_read_boot_sector(bytes_parser)
@@ -92,9 +121,10 @@ class Fat32Reader:
         self.sectors_per_fat = bytes_parser.parse_int_unsigned(0x24, 4)
         self.active_fat_number = bytes_parser.parse_int_unsigned(0x28, 2)
 
-        self.root_catalog_first_cluster_number = bytes_parser.parse_int_unsigned(0x2c, 4)
+        self.root_catalog_first_cluster = bytes_parser.parse_int_unsigned(0x2c,
+                                                                          4)
 
-        self.boot_sector_copy_sector_number = bytes_parser.parse_int_unsigned(0x32, 2)
+        self.boot_sector_copy_sector = bytes_parser.parse_int_unsigned(0x32, 2)
 
     def _parse_read_boot_sector(self, bytes_parser):
         self.bytes_per_sector = bytes_parser.parse_int_unsigned(0x0b, 2)
@@ -103,7 +133,8 @@ class Fat32Reader:
         self.fat_amount = bytes_parser.parse_int_unsigned(0x10, 1)
 
         self.total_sectors = bytes_parser.parse_int_unsigned(0x13, 2)
-        self.hidden_sectors_before_partition = bytes_parser.parse_int_unsigned(0x1c, 4)
+        self.hidden_sectors_before_partition = bytes_parser.parse_int_unsigned(
+            0x1c, 4)
 
         if self.total_sectors == 0:
             self.total_sectors = bytes_parser.parse_int_unsigned(0x20, 4)
@@ -115,10 +146,13 @@ class Fat32Reader:
         if end_sector is None:
             return data[self._sectors_to_bytes(start_sector)]
         else:
-            return data[self._sectors_to_bytes(start_sector):self._sectors_to_bytes(end_sector)]
+            return data[
+                   self._sectors_to_bytes(start_sector):self._sectors_to_bytes(
+                       end_sector)]
 
     def _cluster_slice(self, data, start_cluster, end_cluster):
-        return self._sector_slice(data, start_cluster * self.sectors_per_cluster,
+        return self._sector_slice(data,
+                                  start_cluster * self.sectors_per_cluster,
                                   end_cluster * self.sectors_per_cluster)
 
     def _get_active_fat(self, fat_image):
@@ -133,21 +167,37 @@ class Fat32Reader:
         """
         Возвращает корневой каталог с открываемыми каталогами и файлами.
         """
-        return self._parse_dir_files(self.get_data_from_cluster_chain(self.root_catalog_first_cluster_number))
+        return self._parse_dir_files(
+            self._get_data_from_cluster_chain(self.root_catalog_first_cluster))
 
     def _parse_dir_files(self, data):
         files = list()
         long_file_name_buffer = ""
-        for start in range(0, len(data) - BYTES_PER_DIR_ENTRY, BYTES_PER_DIR_ENTRY):
+        for start in range(0, len(data) - BYTES_PER_DIR_ENTRY,
+                           BYTES_PER_DIR_ENTRY):
+            debug("long_file_name_buffer = \"" + long_file_name_buffer + "\"")
             entry_bytes = data[start:start + BYTES_PER_DIR_ENTRY]
-            if entry_bytes[0] == b'\x05' or entry_bytes[0] == b'\xE5':
+            if entry_bytes[0] == 0x00:
+                # directory has no more entries
+                break
+            if entry_bytes[0] == 0xE5:
+                # unused entry
                 continue
+            if entry_bytes[0] == 0x05:
+                entry_bytes = b'\xe5' + entry_bytes[1:]
+
             entry_parser = BytesParser(entry_bytes)
             attributes = entry_parser.parse_int_unsigned(11, 1)
+            debug_file_attributes(attributes)
             if attributes == fs_objects.LFN:  # Long file name entry
-                long_file_name_buffer = get_lfn_part(entry_bytes) + long_file_name_buffer
+                long_file_name_buffer = get_lfn_part(entry_bytes) + \
+                                        long_file_name_buffer
+            elif attributes & fs_objects.VOLUME_ID:
+                # TODO: Чтение Volume ID
+                pass
             else:
-                file = self._parse_file_entry(entry_parser, long_file_name_buffer)
+                file = self._parse_file_entry(entry_parser,
+                                              long_file_name_buffer)
                 files.append(file)
                 long_file_name_buffer = ""
         return files
@@ -157,34 +207,48 @@ class Fat32Reader:
         debug("\thex: " + entry_parser.hex_readable(0, BYTES_PER_DIR_ENTRY))
 
         file = parse_file_info(entry_parser, long_file_name_buffer)
+
+        if file.short_name == ".." or file.short_name == ".":
+            # ".." - parent directory
+            # "." - current directory
+            return None
+
+        name = "directory" if file.is_directory else "file"
+        debug("Parsing content for " + name + " \"" + file.name + "\" ...")
         file.content = self._get_file_content(entry_parser, file.is_directory)
+        debug(
+            "Parsing content for " + name + " \"" + file.name + "\" completed")
 
         return file
 
     def _get_file_content(self, entry_parser, is_directory):
         first_cluster = parse_file_first_cluster_number(entry_parser)
-        content = self.get_data_from_cluster_chain(first_cluster)
+        if first_cluster == 0:
+            debug("EMPTY")
+            # file is empty
+            return list() if is_directory else None
+        content = self._get_data_from_cluster_chain(first_cluster)
         if is_directory:
             content = self._parse_dir_files(content)
         return content
 
-    def get_data(self, cluster):
-        return self.data[cluster-2]
+    def _get_data(self, cluster):
+        return self.data[cluster - 2]
 
-    def get_data_from_cluster_chain(self, first_cluster):
+    def _get_data_from_cluster_chain(self, first_cluster):
         current_cluster = first_cluster
         data = bytes()
         cluster_chain = str(first_cluster)
         while True:
-            data += self.get_data(current_cluster)
+            data += self._get_data(current_cluster)
             try:
-                current_cluster = self.get_next_file_cluster(current_cluster)
+                current_cluster = self._get_next_file_cluster(current_cluster)
                 cluster_chain += "-" + str(current_cluster)
             except EOFError:
-                debug("Cluster chain: "+cluster_chain)
+                debug("Cluster chain: " + cluster_chain)
                 return data
 
-    def get_next_file_cluster(self, prev_cluster):
+    def _get_next_file_cluster(self, prev_cluster):
         table_value = self.fat_values[prev_cluster]
         if table_value < 0x0FFFFFF7:
             return table_value
@@ -197,10 +261,12 @@ class BytesParser:
         self.byte_arr = byte_arr
 
     def parse_int_unsigned(self, start, length, byteorder='little'):
-        return int.from_bytes(self.byte_arr[start:start + length], byteorder=byteorder, signed=False)
+        return int.from_bytes(self.byte_arr[start:start + length],
+                              byteorder=byteorder, signed=False)
 
     def parse_string(self, start, length, encoding, errors="strict"):
-        return self.byte_arr[start: start + length].decode(encoding=encoding, errors=errors)
+        return self.byte_arr[start: start + length].decode(encoding=encoding,
+                                                           errors=errors)
 
     def parse_time_date(self, start):
         parsed_time = self.parse_time(start)
@@ -208,21 +274,27 @@ class BytesParser:
 
         return datetime.combine(date=parsed_date, time=parsed_time)
 
-    def parse_time(self, start):
+    def parse_time(self, start, raise_errors=True):
         bin_string = self.parse_bin_str(start, 2)
 
         debug("parse_time: " + bin_string)
-        debug("hour: " + bin_string[0:5])
-        debug("minutes: " + bin_string[5:11])
-        debug("seconds: " + bin_string[11:16])
+        debug("\th: " + bin_string[0:5])
+        debug("\tm: " + bin_string[5:11])
+        debug("\ts: " + bin_string[11:16])
 
         hour = int(bin_string[0:5], base=2)
         minutes = int(bin_string[5:11], base=2)
         seconds = int(bin_string[11:16], base=2) * 2
 
-        return time(hour=hour, minute=minutes, second=seconds)
+        try:
+            return time(hour=hour, minute=minutes, second=seconds)
+        except ValueError:
+            if raise_errors:
+                raise
+            else:
+                return None
 
-    def parse_date(self, start):
+    def parse_date(self, start, raise_errors=True):
         bin_string = self.parse_bin_str(start, 2)
 
         debug("parse_date: " + bin_string)
@@ -234,12 +306,21 @@ class BytesParser:
         month = int(bin_string[7:11], base=2)
         day = int(bin_string[11:16], base=2)
 
-        return date(day=day, month=month, year=year)
+        try:
+            return date(day=day, month=month, year=year)
+        except ValueError:
+            if raise_errors:
+                raise
+            else:
+                return None
 
     def parse_bin_str(self, start_byte, length_bytes):
-        return bin(self.parse_int_unsigned(start_byte, length_bytes, byteorder="little"))[2:].zfill(8 * length_bytes)
+        return bin(self.parse_int_unsigned(start_byte, length_bytes,
+                                           byteorder="little"))[2:].zfill(
+            8 * length_bytes)
 
     def hex_readable(self, start, length):
         import binascii
-        h = str(binascii.hexlify(self.byte_arr[start: start + length]))[2:-1].upper()
+        h = str(binascii.hexlify(self.byte_arr[start: start + length]))[
+            2:-1].upper()
         return ' '.join(a + b for a, b in zip(h[::2], h[1::2]))
