@@ -7,14 +7,6 @@
 
 import fat_reader
 
-DEBUG_MODE = True
-
-
-def debug(message):
-    if DEBUG_MODE:
-        print(message)
-
-
 def main():
     fi = open("TEST-IMAGE", "rb")
     size = 0

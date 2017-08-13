@@ -4,10 +4,15 @@ from datetime import datetime, date, time, timedelta
 import itertools
 import fs_objects
 
-from main import debug
-
 BYTES_PER_DIR_ENTRY = 32
 BYTES_PER_FAT32_ENTRY = 4
+
+DEBUG_MODE = True
+
+
+def debug(message):
+    if DEBUG_MODE:
+        print(message)
 
 
 def format_fat_address(address):
@@ -165,12 +170,11 @@ class Fat32Reader:
 
     def get_root_directory(self):
         """
-        Возвращает корневой каталог с открываемыми каталогами и файлами.
+        Возвращает корневой каталог в виде списка с открываемыми каталогами и файлами.
         """
-        return self._parse_dir_files(
-            self._get_data_from_cluster_chain(self.root_catalog_first_cluster))
+        return self._parse_dir_files(self._get_data_from_cluster_chain(self.root_catalog_first_cluster))
 
-    def _parse_dir_files(self, data):
+    def _parse_dir_files(self, data, directory=None):
         files = list()
         long_file_name_buffer = ""
         for start in range(0, len(data) - BYTES_PER_DIR_ENTRY,
@@ -196,8 +200,8 @@ class Fat32Reader:
                 # TODO: Чтение Volume ID
                 pass
             else:
-                file = self._parse_file_entry(entry_parser,
-                                              long_file_name_buffer)
+                file = self._parse_file_entry(entry_parser, long_file_name_buffer)
+                file.parent = directory
                 files.append(file)
                 long_file_name_buffer = ""
         return files

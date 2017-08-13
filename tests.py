@@ -1,12 +1,14 @@
 # !/usr/bin/env python3
 import datetime
 import unittest
+
+import directory_browser
 import fat_reader
 import fs_objects
 from fat_reader import BytesParser
 
 ASCII = "ascii"
-UTF8 = "utf8"
+UTF16 = "utf16"
 
 
 class BytesParserTests(unittest.TestCase):
@@ -31,8 +33,8 @@ class BytesParserTests(unittest.TestCase):
         self.assertEqual(0x55, parser.parse_int_unsigned(5, 1))
 
     def test_parse_string_start(self):
-        parser = BytesParser("I love Python".encode(encoding=UTF8))
-        self.assertEqual("I love", parser.parse_string(0, 6, encoding=UTF8))
+        parser = BytesParser("Я love Python".encode(encoding=UTF16))
+        self.assertEqual("Я love", parser.parse_string(0, 14, encoding=UTF16))
 
     def test_parse_string_middle(self):
         parser = BytesParser("I love Python".encode(encoding=ASCII))
@@ -75,7 +77,7 @@ class BytesParserTests(unittest.TestCase):
 
 class FatReaderStaticTests(unittest.TestCase):
     def test_file_parse(self):
-        file_expected = fs_objects.File('SHORT.TXT', '', None, fs_objects.ARCHIVE,
+        file_expected = fs_objects.File('SHORT.TXT', '', fs_objects.ARCHIVE,
                                         datetime.datetime(day=29, month=7, year=2017, hour=14, minute=53, second=16,
                                                           microsecond=76000),
                                         datetime.date(day=29, month=7, year=2017),
@@ -86,3 +88,32 @@ class FatReaderStaticTests(unittest.TestCase):
                              b'\x00\x05\xA3\xEE\x4A\x55\x00\xA3\x06\x00\x00')
         file_actual = fat_reader.parse_file_info(parser)
         self.assertEqual(file_actual, file_expected)
+
+
+if __name__ == '__main__':
+    unittest.main()
+
+
+def generate_files_from_names(names):
+    for name in names:
+        yield fs_objects.File("", name)
+
+
+class DirectoryBrowserTests(unittest.TestCase):
+    def test_get_dir_content_names(self):
+        names = ["File1.txt", "File2.txt", "File3.txt"]
+        d = fs_objects.File("DIR", "",
+                            fs_objects.DIRECTORY)
+        d.content = list(generate_files_from_names(names))
+        self.assertEqual(list(directory_browser.get_dir_content_names(d)), names)
+
+    def test_get_dir_content_names_empty_dir(self):
+        d = fs_objects.File("DIR", "",
+                            fs_objects.DIRECTORY)
+        d.content = []
+        self.assertEqual(list(directory_browser.get_dir_content_names(d)), [])
+
+    def test_get_dir_content_names_not_a_dir(self):
+        file = fs_objects.File("", "File.txt")
+        with self.assertRaises(ValueError):
+            list(directory_browser.get_dir_content_names(file))

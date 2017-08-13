@@ -1,5 +1,5 @@
 # !/usr/bin/env python3
-from main import debug
+import datetime
 
 READ_ONLY = 0x01
 HIDDEN = 0x02
@@ -11,14 +11,17 @@ LFN = READ_ONLY | HIDDEN | SYSTEM | VOLUME_ID
 
 
 class File:
+    content = None
+    parent = None
+
     def __init__(self,
                  short_name,
                  long_name,
-                 attributes,
-                 create_datetime,
-                 last_open_date,
-                 change_datetime,
-                 size_bytes):
+                 attributes=0,
+                 create_datetime=datetime.datetime.now(),
+                 last_open_date=datetime.date.today(),
+                 change_datetime=datetime.datetime.now(),
+                 size_bytes=0):
         self.short_name = short_name
         self.long_name = long_name
         self.attributes = attributes
@@ -34,6 +37,9 @@ class File:
     @property
     def name(self):
         return self.long_name if self.long_name else self.short_name
+
+    def get_absolute_path(self):
+        return (self.parent.get_absolute_path() if self.parent is not None else "") + "/" + self.name
 
     def __eq__(self, other):
         self._eq_debug(other)
@@ -58,4 +64,4 @@ class File:
 
 
 def eq_debug(one, other):
-    debug(str(one) + (" == " if one == other else" != ") + str(other))
+    print(str(one) + (" == " if one == other else" != ") + str(other))
