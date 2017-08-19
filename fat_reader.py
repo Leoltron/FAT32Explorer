@@ -169,12 +169,13 @@ class Fat32Reader:
         return self._sector_slice(fat_image, start, end)
 
     def get_root_directory(self):
-        """
-        Возвращает корневой каталог в виде списка с открываемыми каталогами и файлами.
-        """
-        return self._parse_dir_files(self._get_data_from_cluster_chain(self.root_catalog_first_cluster))
+        root = fs_objects.File("", "", fs_objects.DIRECTORY, None, None, None, 0)
+        root.content = self._parse_dir_files(self._get_data_from_cluster_chain(self.root_catalog_first_cluster), root)
+        for file in root.content:
+            root.size_bytes += file.size_bytes
+        return root
 
-    def _parse_dir_files(self, data, directory=None):
+    def _parse_dir_files(self, data, directory):
         files = list()
         long_file_name_buffer = ""
         for start in range(0, len(data) - BYTES_PER_DIR_ENTRY,

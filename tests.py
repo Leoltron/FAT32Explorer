@@ -105,15 +105,15 @@ class DirectoryBrowserTests(unittest.TestCase):
         d = fs_objects.File("DIR", "",
                             fs_objects.DIRECTORY)
         d.content = list(generate_files_from_names(names))
-        self.assertEqual(list(directory_browser.get_dir_content_names(d)), names)
+        self.assertEqual(list(directory_browser._get_dir_content_names(d)), names)
 
     def test_get_dir_content_names_empty_dir(self):
         d = fs_objects.File("DIR", "",
                             fs_objects.DIRECTORY)
         d.content = []
-        self.assertEqual(list(directory_browser.get_dir_content_names(d)), [])
+        self.assertEqual(list(directory_browser._get_dir_content_names(d)), [])
 
     def test_get_dir_content_names_not_a_dir(self):
         file = fs_objects.File("", "File.txt")
         with self.assertRaises(ValueError):
-            list(directory_browser.get_dir_content_names(file))
+            list(directory_browser._get_dir_content_names(file))
