@@ -2,11 +2,14 @@
 
 import fs_objects
 
+DATETIME_FORMAT = "%d.%m.%Y %H:%M:%S"
+
 
 def reg_command(dict_registry, name):
     def reg(f):
         dict_registry[name] = f
         return f
+
     return reg
 
 
@@ -61,7 +64,8 @@ class DirectoryBrowser:
         if command in self._commands:
             self._commands[command](args_string)
         else:
-            print('Wrong command. Print "help" to get list of available commands.')
+            print('Wrong command. '
+                  'Print "help" to get list of available commands.')
 
     @reg_command(_commands, "help")
     def print_help(self, args):
@@ -95,31 +99,63 @@ class DirectoryBrowser:
                 self.current = file
 
     def find(self, name, priority=None) -> fs_objects.File:
+        if name == ".":
+            return self.current
+        elif name == "..":
+            return self._get_parent_dir()
+
         file_found = None
         for file in self.current.content:
             if file.name == name:
                 if priority is None or (
-                                priority == "directory" and file.is_directory) or (
+                                priority == "directory" and file.is_directory
+                ) or (
                                 priority == "file" and not file.is_directory):
                     return file
                 else:
                     file_found = file
         return file_found
 
+    def _get_parent_dir(self):
+        if self.current.parent is not None:
+            return self.current.parent
+        else:
+            raise DirectoryBrowserError(
+                ("Root" if self.current == self.root else "Current") +
+                " directory does not have a parent directory!")
+
     @reg_command(_commands, "dir")
     def dir(self, args):
         print(self.current.get_absolute_path() + " content:")
         for file in self.current.content:
-            print(file.change_datetime.strftime("%d.%m.%Y %H:%M:%S") + "    " + (
-                "directory    " if file.is_directory else "   file      ") + file.name)
+            print(
+                file.change_datetime.strftime(DATETIME_FORMAT) + "    " +
+                ("directory    " if file.is_directory else "   file      ")
+                + file.name)
 
     @reg_command(_commands, "info")
     def info(self, args):
-        pass
+        file = self.find(args)
+        print("info about file " + file.get_absolute_path() + ":")
+        print("\tShort name: " + file.short_name)
+        if file.long_name:
+            print("\tLong name: " + file.long_name)
+        print("\tAttributes: " + file.get_attributes_str())
+        print("\tCreation date/time: " + file.create_datetime.strftime(
+            DATETIME_FORMAT))
+        print("\tLast change date/time: " + file.change_datetime.strftime(
+            DATETIME_FORMAT))
+        print("\tLast opened: " + file.last_open_date.strftime("%d.%m.%Y"))
 
     @reg_command(_commands, "open")
     def open(self, args):
-        pass
+        file = self.find(args)
+        if file.is_directory:
+            self.current = file
+        else:
+            # TODO: open file
+            pass
+        file.update_last_open_date()
 
 
 class DirectoryBrowserError(Exception):
