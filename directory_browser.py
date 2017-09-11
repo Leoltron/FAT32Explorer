@@ -62,14 +62,22 @@ class DirectoryBrowser:
 
     def _process_command(self, command, args_string=""):
         if command in self._commands:
-            self._commands[command](args_string)
+            self._commands[command](self, args_string)
         else:
             print('Wrong command. '
                   'Print "help" to get list of available commands.')
 
+    # noinspection PyUnusedLocal
     @reg_command(_commands, "help")
     def print_help(self, args):
-        pass
+        print("cd <directory>    - changes directory\n"
+              "dir               - prints the content of current directory\n"
+              "info <file>       - prints info about the file\n"
+              "help              - print this\n"
+              "open <file>       - cd, if file is a directory, otherwise "
+              "make a "
+              "temporary copy of the file and try to open it trough system\n"
+              "quit              - quits the interactive mode")
 
     # noinspection PyUnusedLocal
     @reg_command(_commands, "quit")
@@ -98,7 +106,7 @@ class DirectoryBrowser:
             else:
                 self.current = file
 
-    def find(self, name, priority=None) -> fs_objects.File:
+    def find(self, name, priority=None, ) -> fs_objects.File:
         if name == ".":
             return self.current
         elif name == "..":

@@ -169,8 +169,11 @@ class Fat32Reader:
         return self._sector_slice(fat_image, start, end)
 
     def get_root_directory(self):
-        root = fs_objects.File("", "", fs_objects.DIRECTORY, None, None, None, 0)
-        root.content = self._parse_dir_files(self._get_data_from_cluster_chain(self.root_catalog_first_cluster), root)
+        root = fs_objects.File("", "", fs_objects.DIRECTORY, None, None, None,
+                               0)
+        root.content = self._parse_dir_files(
+            self._get_data_from_cluster_chain(self.root_catalog_first_cluster),
+            root)
         for file in root.content:
             root.size_bytes += file.size_bytes
         return root
@@ -201,7 +204,11 @@ class Fat32Reader:
                 # TODO: Чтение Volume ID
                 pass
             else:
-                file = self._parse_file_entry(entry_parser, long_file_name_buffer)
+                try:
+                    file = self._parse_file_entry(entry_parser,
+                                              long_file_name_buffer)
+                except ValueError:
+                    continue
                 file.parent = directory
                 files.append(file)
                 long_file_name_buffer = ""
@@ -216,25 +223,28 @@ class Fat32Reader:
         if file.short_name == ".." or file.short_name == ".":
             # ".." - parent directory
             # "." - current directory
-            return None
+            raise ValueError("Entry refers to the " +
+                             ("directory itself" if
+                              file.short_name == "." else
+                              "parent directory."))
 
         name = "directory" if file.is_directory else "file"
         debug("Parsing content for " + name + " \"" + file.name + "\" ...")
-        file.content = self._get_file_content(entry_parser, file.is_directory)
+        file.content = self._get_file_content(entry_parser, file)
         debug(
             "Parsing content for " + name + " \"" + file.name + "\" completed")
 
         return file
 
-    def _get_file_content(self, entry_parser, is_directory):
+    def _get_file_content(self, entry_parser, file):
         first_cluster = parse_file_first_cluster_number(entry_parser)
         if first_cluster == 0:
             debug("EMPTY")
             # file is empty
-            return list() if is_directory else None
+            return list() if file.is_directory else None
         content = self._get_data_from_cluster_chain(first_cluster)
-        if is_directory:
-            content = self._parse_dir_files(content)
+        if file.is_directory:
+            content = self._parse_dir_files(content, file)
         return content
 
     def _get_data(self, cluster):

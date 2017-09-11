@@ -6,18 +6,16 @@
 # Реализовать утилиту для чтения файлов и просмотра листингов директорий.
 
 import fat_reader
+from directory_browser import DirectoryBrowser
 
 def main():
     fi = open("TEST-IMAGE", "rb")
-    size = 0
     try:
-        bs = fi.read()
-        f = fat_reader.Fat32Reader(bs)
-        d = f.get_root_directory()
-        size = len(bs)
+        f = fat_reader.Fat32Reader(fi.read())
     finally:
         fi.close()
-    print("Hello, size = " + str(size))
+    d = f.get_root_directory()
+    DirectoryBrowser(d).start_interactive_mode()
 
 
 if __name__ == '__main__':

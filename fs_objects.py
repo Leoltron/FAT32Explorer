@@ -59,8 +59,12 @@ class File:
         return self.long_name if self.long_name else self.short_name
 
     def get_absolute_path(self):
-        return (
-                   self.parent.get_absolute_path() if self.parent is not None else "") + "/" + self.name
+        names = [self.name]
+        file = self
+        while file.parent is not None:
+            names.append(file.parent.name)
+            file = file.parent
+        return "/".join(names[::-1])
 
     def __eq__(self, other):
         self._eq_debug(other)
