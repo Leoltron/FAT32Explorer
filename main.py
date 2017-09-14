@@ -8,6 +8,7 @@
 import fat_reader
 from directory_browser import DirectoryBrowser
 
+
 def main():
     fi = open("TEST-IMAGE", "rb")
     try:

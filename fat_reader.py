@@ -7,7 +7,7 @@ import fs_objects
 BYTES_PER_DIR_ENTRY = 32
 BYTES_PER_FAT32_ENTRY = 4
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 
 def debug(message):
@@ -206,7 +206,7 @@ class Fat32Reader:
             else:
                 try:
                     file = self._parse_file_entry(entry_parser,
-                                              long_file_name_buffer)
+                                                  long_file_name_buffer)
                 except ValueError:
                     continue
                 file.parent = directory
@@ -230,7 +230,10 @@ class Fat32Reader:
 
         name = "directory" if file.is_directory else "file"
         debug("Parsing content for " + name + " \"" + file.name + "\" ...")
-        file.content = self._get_file_content(entry_parser, file)
+        content = self._get_file_content(entry_parser, file)
+        if content is None:
+            content = b""
+        file.content = content
         debug(
             "Parsing content for " + name + " \"" + file.name + "\" completed")
 
@@ -240,11 +243,12 @@ class Fat32Reader:
         first_cluster = parse_file_first_cluster_number(entry_parser)
         if first_cluster == 0:
             debug("EMPTY")
-            # file is empty
-            return list() if file.is_directory else None
+            return list() if file.is_directory else bytes()
         content = self._get_data_from_cluster_chain(first_cluster)
         if file.is_directory:
             content = self._parse_dir_files(content, file)
+        elif file.size_bytes < len(content):
+            content = content[:file.size_bytes]
         return content
 
     def _get_data(self, cluster):
