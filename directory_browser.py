@@ -1,8 +1,16 @@
 # !/usr/bin/env python3
-
+import shutil
+import subprocess
+import os
+import sys
 import fs_objects
 
 DATETIME_FORMAT = "%d.%m.%Y %H:%M:%S"
+
+
+def dispose_temp_files():
+    if os.path.isdir("temp"):
+        shutil.rmtree("temp")
 
 
 def reg_command(dict_registry, name):
@@ -57,6 +65,9 @@ class DirectoryBrowser:
                 self._process_command(*command.split(" ", 1))
             except DirectoryBrowserError as e:
                 print(e.message)
+            except Exception:
+                dispose_temp_files()
+                raise
 
     _commands = dict()
 
@@ -83,9 +94,13 @@ class DirectoryBrowser:
     @reg_command(_commands, "quit")
     def stop_interactive_mode(self, args):
         self._int_running = False
+        dispose_temp_files()
 
     @reg_command(_commands, "cd")
     def change_directory(self, args):
+        if len(args) == 0:
+            raise DirectoryBrowserError("Usage: cd <folder name>")
+
         dirs = args.split("/")
         if len(dirs) > 1:
             prev_dir = self.current
@@ -106,14 +121,20 @@ class DirectoryBrowser:
             else:
                 self.current = file
 
-    def find(self, name, priority=None, ) -> fs_objects.File:
+    def find(self, name, source=None, priority=None) -> fs_objects.File:
+        if source is None:
+            source = self.current
+        dirs = name.split("/", maxsplit=1)
+        if len(dirs) > 1:
+            return self.find(dirs[1], source=self.find(dirs[0], source=source, priority="directory"), priority=priority)
+
         if name == ".":
-            return self.current
+            return source
         elif name == "..":
-            return self._get_parent_dir()
+            return source.parent
 
         file_found = None
-        for file in self.current.content:
+        for file in source.content:
             if file.name == name:
                 if priority is None or (
                                 priority == "directory" and file.is_directory
@@ -144,6 +165,8 @@ class DirectoryBrowser:
     @reg_command(_commands, "info")
     def info(self, args):
         file = self.find(args)
+        if file is None:
+            raise DirectoryBrowserError(args + " not found.")
         print("info about file " + file.get_absolute_path() + ":")
         print("\tShort name: " + file.short_name)
         if file.long_name:
@@ -158,11 +181,25 @@ class DirectoryBrowser:
     @reg_command(_commands, "open")
     def open(self, args):
         file = self.find(args)
+        if file is None:
+            raise DirectoryBrowserError(args + " not found.")
+
         if file.is_directory:
             self.current = file
         else:
-            # TODO: open file
-            pass
+            path = "temp" + file.get_absolute_path()
+            splitted_path = path.rsplit("/", maxsplit=1)
+            directory = splitted_path[0] if len(splitted_path) > 1 else ""
+            if directory and not os.path.exists(directory):
+                os.makedirs(directory)
+            with open(path, "wb") as system_file:
+                if file.content:
+                    system_file.write(file.content)
+
+            if sys.platform == 'linux2':
+                subprocess.call(["xdg-open", path])
+            else:
+                os.startfile(path.replace("/", "\\"))
         file.update_last_open_date()
 
 
