@@ -5,12 +5,24 @@
 #
 # Реализовать утилиту для чтения файлов и просмотра листингов директорий.
 
+import sys
 import fat_reader
 from directory_browser import DirectoryBrowser
+from pathlib import Path
 
 
 def main():
-    fi = open("TEST-IMAGE", "rb")
+    image_file_name = ' '.join(sys.argv[1:])
+    image_file_path = Path(image_file_name)
+
+    if not image_file_path.exists():
+        print("File "+image_file_name + " not found.")
+        return
+    if not image_file_path.is_file():
+        print(image_file_name + " is not a file.")
+        return
+
+    fi = open(image_file_name, "rb")
     try:
         f = fat_reader.Fat32Reader(fi.read())
     finally:
