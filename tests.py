@@ -24,6 +24,51 @@ class FileTests(unittest.TestCase):
         folder2.parent = folder1
         self.assertEqual(folder2.get_absolute_path(), "root/Folder1/Folder2")
 
+    def test_size_format_byte(self):
+        file = fs_objects.File("file", "file", size_bytes=1)
+        self.assertEqual("1 byte", file.get_size_str())
+
+    def test_size_format_bytes(self):
+        file = fs_objects.File("file", "file", size_bytes=5)
+        self.assertEqual("5 bytes", file.get_size_str())
+
+    def test_size_format_kibibytes(self):
+        file = fs_objects.File("file", "file", size_bytes=855310)
+        self.assertEqual("835.26 KiB (855310 bytes)", file.get_size_str())
+
+    def test_size_format_mebibytes(self):
+        file = fs_objects.File("file", "file", size_bytes=6389353)
+        self.assertEqual("6.09 MiB (6389353 bytes)", file.get_size_str())
+
+    def test_size_format_gibibytes(self):
+        file = fs_objects.File("file", "file", size_bytes=281382002220)
+        self.assertEqual("262.06 GiB (281382002220 bytes)",
+                         file.get_size_str())
+
+    def test_attr_str_full(self):
+        file = fs_objects.File("file", "file",
+                               fs_objects.READ_ONLY |
+                               fs_objects.HIDDEN |
+                               fs_objects.SYSTEM |
+                               fs_objects.VOLUME_ID |
+                               fs_objects.DIRECTORY |
+                               fs_objects.ARCHIVE)
+        self.assertEqual("read_only, hidden, system, "
+                         "volume_id, directory, archive"
+                         , file.get_attributes_str())
+
+    def test_attr_str_part(self):
+        file = fs_objects.File("file", "file",
+                               fs_objects.READ_ONLY |
+                               fs_objects.HIDDEN |
+                               fs_objects.ARCHIVE)
+        self.assertEqual("read_only, hidden, archive",
+                         file.get_attributes_str())
+
+    def test_attr_str_empty(self):
+        file = fs_objects.File("file", "file")
+        self.assertEqual("", file.get_attributes_str())
+
 
 class BytesParserTests(unittest.TestCase):
     def test_parse_int_simple(self):
@@ -111,8 +156,9 @@ class FatReaderStaticTests(unittest.TestCase):
                                         1699)
 
         parser = BytesParser(
-            b'\x53\x48\x4F\x52\x54\x20\x20\x20\x54\x58\x54\x20\x18\x4C\xA8\x76\xFD\x4A\xFD\x4A\x00'
-            b'\x00\x05\xA3\xEE\x4A\x55\x00\xA3\x06\x00\x00')
+            b'\x53\x48\x4F\x52\x54\x20\x20\x20\x54\x58\x54\x20\x18\x4C\xA8\x76'
+            b'\xFD\x4A\xFD\x4A\x00\x00\x05\xA3\xEE\x4A\x55\x00\xA3\x06\x00\x00'
+        )
         file_actual = fat_reader.parse_file_info(parser)
         self.assertEqual(file_actual, file_expected)
 

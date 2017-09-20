@@ -112,13 +112,13 @@ class File:
         bytes_str = "(" + bytes_str + ")"
 
         if self.size_bytes >= 2 ** 40:
-            short_str = "{.2f} TiB ".format(self.size_bytes / (2 ** 40))
+            short_str = "{:.2f} TiB ".format(self.size_bytes / (2 ** 40))
         elif self.size_bytes >= 2 ** 30:
-            short_str = "{.2f} GiB ".format(self.size_bytes / (2 ** 30))
+            short_str = "{:.2f} GiB ".format(self.size_bytes / (2 ** 30))
         elif self.size_bytes >= 2 ** 20:
-            short_str = "{.2f} MiB ".format(self.size_bytes / (2 ** 20))
+            short_str = "{:.2f} MiB ".format(self.size_bytes / (2 ** 20))
         else:
-            short_str = "{.2f} KiB ".format(self.size_bytes / (2 ** 10))
+            short_str = "{:.2f} KiB ".format(self.size_bytes / (2 ** 10))
 
         return short_str + bytes_str
 
