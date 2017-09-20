@@ -162,6 +162,38 @@ class FatReaderStaticTests(unittest.TestCase):
         file_actual = fat_reader.parse_file_info(parser)
         self.assertEqual(file_actual, file_expected)
 
+    def test_lfn_part(self):
+        lfn_bytes = b'\x43\x38\x04\x38\x04\x2E\x00\x74\x00\x78\x00' \
+                    b'\x0F\x00\x31\x74\x00\x00\x00\xFF\xFF\xFF\xFF' \
+                    b'\xFF\xFF\xFF\xFF\x00\x00\xFF\xFF\xFF\xFF'
+        self.assertEqual(fat_reader.get_lfn_part(lfn_bytes),
+                         "ии.txt")
+
+
+class FatReaderTests(unittest.TestCase):
+    # noinspection SpellCheckingInspection
+    def test_image(self):
+        fi = open("TEST-IMAGE", "rb")
+        try:
+            f = fat_reader.Fat32Reader(fi.read())
+        finally:
+            fi.close()
+        names = f.get_root_directory().get_dir_hierarchy()
+        self.assertEqual(names,
+                         {
+                             "System Volume Information": {
+                                 "WPSettings.dat": {},
+                                 "IndexerVolumeGuid": {}},
+                             "Folder1": {"Astaf.txt": {}, "SHORT.TXT": {}},
+                             "Файл.txt": {},
+                             "FileQWERTYUIOPASDFGHJKLZXCVBNMAZQWSXEDCRF"
+                             "VTGBYHNUJMIKZAWSXEDCRGBY"
+                             "HUJNMZQAWSXEDCRTGBYHNUJMIK.txt": {},
+                             "VXlZSvgG0z0.jpg": {},
+                             "Файл с кириллицей в названии.txt": {},
+                             "$RECYCLE": {"DESKTOP.INI": {}}, }
+                         )
+
 
 if __name__ == '__main__':
     unittest.main()

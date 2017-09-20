@@ -75,24 +75,6 @@ def parse_file_info(entry_parser, long_file_name_buffer=""):
                            file_size_bytes)
 
 
-def debug_file_attributes(attributes):
-    debug(hex(attributes) + " -> attributes:")
-    if attributes & fs_objects.READ_ONLY:
-        debug("\tREAD_ONLY")
-    if attributes & fs_objects.HIDDEN:
-        debug("\tHIDDEN")
-    if attributes & fs_objects.SYSTEM:
-        debug("\tSYSTEM")
-    if attributes & fs_objects.VOLUME_ID:
-        debug("\tVOLUME_ID")
-    if attributes & fs_objects.DIRECTORY:
-        debug("\tDIRECTORY")
-    if attributes & fs_objects.ARCHIVE:
-        debug("\tARCHIVE")
-    if attributes == fs_objects.LFN:
-        debug("\tLFN")
-
-
 class Fat32Reader:
     def __init__(self, fat_image):
         self._read_fat32_boot_sector(BytesParser(fat_image))
@@ -196,7 +178,7 @@ class Fat32Reader:
 
             entry_parser = BytesParser(entry_bytes)
             attributes = entry_parser.parse_int_unsigned(11, 1)
-            debug_file_attributes(attributes)
+
             if attributes == fs_objects.LFN:  # Long file name entry
                 long_file_name_buffer = get_lfn_part(entry_bytes) + \
                                         long_file_name_buffer
@@ -212,6 +194,7 @@ class Fat32Reader:
                 file.parent = directory
                 files.append(file)
                 long_file_name_buffer = ""
+                debug(file.get_attributes_str())
         return files
 
     def _parse_file_entry(self, entry_parser, long_file_name_buffer):

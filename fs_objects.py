@@ -125,6 +125,13 @@ class File:
     def update_last_open_date(self):
         self.last_open_date = datetime.date.today()
 
+    def get_dir_hierarchy(self):
+        hierarchy = dict()
+        if self.is_directory:
+            for file in self.content:
+                hierarchy[file.name] = file.get_dir_hierarchy()
+        return hierarchy
+
 
 def eq_debug(one, other):
     print(str(one) + (" == " if one == other else" != ") + str(other))
