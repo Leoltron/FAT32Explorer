@@ -9,6 +9,7 @@ DIRECTORY = 0x10
 ARCHIVE = 0x20
 LFN = READ_ONLY | HIDDEN | SYSTEM | VOLUME_ID
 
+DEBUG_MODE = False
 
 class File:
     content = None
@@ -67,7 +68,8 @@ class File:
         return "/".join(names[::-1])
 
     def __eq__(self, other):
-        self._eq_debug(other)
+        if DEBUG_MODE:
+            self._eq_debug(other)
         return self.short_name == other.short_name \
                and self.long_name == other.long_name \
                and self.content == other.content \

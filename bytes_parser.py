@@ -28,7 +28,7 @@ class BytesParser:
 
         return datetime.combine(date=parsed_date, time=parsed_time)
 
-    def parse_time(self, start, raise_errors=True):
+    def parse_time(self, start):
         bin_string = self.parse_bin_str(start, 2)
 
         debug("parse_time: " + bin_string)
@@ -40,15 +40,9 @@ class BytesParser:
         minutes = int(bin_string[5:11], base=2)
         seconds = int(bin_string[11:16], base=2) * 2
 
-        try:
-            return time(hour=hour, minute=minutes, second=seconds)
-        except ValueError:
-            if raise_errors:
-                raise
-            else:
-                return None
+        return time(hour=hour, minute=minutes, second=seconds)
 
-    def parse_date(self, start, raise_errors=True):
+    def parse_date(self, start):
         bin_string = self.parse_bin_str(start, 2)
 
         debug("parse_date: " + bin_string)
@@ -60,13 +54,7 @@ class BytesParser:
         month = int(bin_string[7:11], base=2)
         day = int(bin_string[11:16], base=2)
 
-        try:
-            return date(day=day, month=month, year=year)
-        except ValueError:
-            if raise_errors:
-                raise
-            else:
-                return None
+        return date(day=day, month=month, year=year)
 
     def parse_bin_str(self, start_byte, length_bytes):
         return bin(self.parse_int_unsigned(start_byte, length_bytes,
