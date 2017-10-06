@@ -29,7 +29,7 @@ class File:
         self.create_datetime = create_datetime
         self.last_open_date = last_open_date
         self.change_datetime = change_datetime
-        self.size_bytes = size_bytes
+        self._size_bytes = size_bytes
 
     @property
     def is_read_only(self):
@@ -77,7 +77,7 @@ class File:
                and self.create_datetime == other.create_datetime \
                and self.last_open_date == other.last_open_date \
                and self.change_datetime == other.change_datetime \
-               and self.size_bytes == other.size_bytes
+               and self._size_bytes == other._size_bytes
 
     def _eq_debug(self, other):
         eq_debug('\"' + self.short_name + '\"', '\"' + other.short_name + '\"')
@@ -87,7 +87,7 @@ class File:
         eq_debug(self.create_datetime, other.create_datetime)
         eq_debug(self.last_open_date, other.last_open_date)
         eq_debug(self.change_datetime, other.change_datetime)
-        eq_debug(self.size_bytes, other.size_bytes)
+        eq_debug(self._size_bytes, other._size_bytes)
 
     def get_attributes_str(self):
         attributes_list = list()
@@ -105,22 +105,32 @@ class File:
             attributes_list.append("archive")
         return ", ".join(attributes_list)
 
+    @property
+    def size_bytes(self):
+        size = self._size_bytes
+        if self.is_directory:
+            for file in self.content:
+                size += file.size_bytes
+        return size
+
     def get_size_str(self):
-        bytes_str = "{} {}".format(self.size_bytes,
-                                   "byte" if self.size_bytes == 1 else "bytes")
-        if self.size_bytes < 2 ** 10:
+        size = self.size_bytes
+
+        bytes_str = "{} {}".format(size,
+                                   "byte" if size == 1 else "bytes")
+        if size < 2 ** 10:
             return bytes_str
 
         bytes_str = "(" + bytes_str + ")"
 
-        if self.size_bytes >= 2 ** 40:
-            short_str = "{:.2f} TiB ".format(self.size_bytes / (2 ** 40))
-        elif self.size_bytes >= 2 ** 30:
-            short_str = "{:.2f} GiB ".format(self.size_bytes / (2 ** 30))
-        elif self.size_bytes >= 2 ** 20:
-            short_str = "{:.2f} MiB ".format(self.size_bytes / (2 ** 20))
+        if size >= 2 ** 40:
+            short_str = "{:.2f} TiB ".format(size / (2 ** 40))
+        elif size >= 2 ** 30:
+            short_str = "{:.2f} GiB ".format(size / (2 ** 30))
+        elif size >= 2 ** 20:
+            short_str = "{:.2f} MiB ".format(size / (2 ** 20))
         else:
-            short_str = "{:.2f} KiB ".format(self.size_bytes / (2 ** 10))
+            short_str = "{:.2f} KiB ".format(size / (2 ** 10))
 
         return short_str + bytes_str
 

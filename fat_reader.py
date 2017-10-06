@@ -78,7 +78,8 @@ def parse_file_info(entry_parser, long_file_name_buffer=""):
 
 class Fat32Reader:
     def __init__(self, fat_image):
-        self._read_fat32_boot_sector(BytesParser(fat_image))
+        self._read_fat32_boot_sector(fat_image)
+        self._read_and_valid_fs_info(fat_image)
         self._parse_fat_values(fat_image)
         self._parse_data_area(fat_image)
 
@@ -103,18 +104,22 @@ class Fat32Reader:
             self.data.append(fat_image[cluster_start:cluster_start +
                                                      bytes_per_cluster])
 
-    def _read_fat32_boot_sector(self, bytes_parser):
-        self._parse_read_boot_sector(bytes_parser)
+    def _read_fat32_boot_sector(self, fat_image):
+        bytes_parser = BytesParser(fat_image)
+        self._parse_boot_sector(bytes_parser)
 
         self.sectors_per_fat = bytes_parser.parse_int_unsigned(0x24, 4)
         self.active_fat_number = bytes_parser.parse_int_unsigned(0x28, 2)
 
         self.root_catalog_first_cluster = bytes_parser.parse_int_unsigned(0x2c,
                                                                           4)
+        self._fs_info_sector = bytes_parser.parse_int_unsigned(0x30, 2)
+
+        self._parse_boot_sector(bytes_parser)
 
         self.boot_sector_copy_sector = bytes_parser.parse_int_unsigned(0x32, 2)
 
-    def _parse_read_boot_sector(self, bytes_parser):
+    def _parse_boot_sector(self, bytes_parser):
         self.bytes_per_sector = bytes_parser.parse_int_unsigned(0x0b, 2)
         self.sectors_per_cluster = bytes_parser.parse_int_unsigned(0x0d, 1)
         self.reserved_sectors = bytes_parser.parse_int_unsigned(0x0e, 2)
@@ -127,16 +132,24 @@ class Fat32Reader:
         if self.total_sectors == 0:
             self.total_sectors = bytes_parser.parse_int_unsigned(0x20, 4)
 
+    def _read_and_valid_fs_info(self, fat_image):
+        fs_info_bytes = self._sector_slice(fat_image, self._fs_info_sector)
+        if (fs_info_bytes[0:4] != b'\x52\x52\x61\x41' or
+                    fs_info_bytes[0x1E4:0x1E4 + 4] != b'\x72\x72\x41\x61' or
+                    fs_info_bytes[0x1FC:0x1FC + 4] != b'\x00\x00\x55\xAA'):
+            raise ValueError("Incorrect format of FS Info sector")
+        # parser = BytesParser(fs_info_bytes)
+
     def _sectors_to_bytes(self, sectors):
         return self.bytes_per_sector * sectors
 
     def _sector_slice(self, data, start_sector, end_sector=None):
         if end_sector is None:
-            return data[self._sectors_to_bytes(start_sector)]
+            return self._sector_slice(data, start_sector, start_sector + 1)
         else:
             return data[
-                   self._sectors_to_bytes(start_sector):self._sectors_to_bytes(
-                       end_sector)]
+                   self._sectors_to_bytes(start_sector):
+                   self._sectors_to_bytes(end_sector)]
 
     def _cluster_slice(self, data, start_cluster, end_cluster):
         return self._sector_slice(data,
@@ -158,7 +171,7 @@ class Fat32Reader:
             self._get_data_from_cluster_chain(self.root_catalog_first_cluster),
             root)
         for file in root.content:
-            root.size_bytes += file.size_bytes
+            root._size_bytes += file._size_bytes
         return root
 
     def _parse_dir_files(self, data, directory):
@@ -231,8 +244,8 @@ class Fat32Reader:
         content = self._get_data_from_cluster_chain(first_cluster)
         if file.is_directory:
             content = self._parse_dir_files(content, file)
-        elif file.size_bytes < len(content):
-            content = content[:file.size_bytes]
+        elif file._size_bytes < len(content):
+            content = content[:file._size_bytes]
         return content
 
     def _get_data(self, cluster):
