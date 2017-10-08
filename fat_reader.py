@@ -79,7 +79,8 @@ def parse_file_info(entry_parser, long_file_name_buffer=""):
 class Fat32Reader:
     def __init__(self, fat_image):
         self._read_fat32_boot_sector(fat_image)
-        self._read_and_valid_fs_info(fat_image)
+        self._read_and_validate_fs_info(fat_image)
+        self._validate_fat(fat_image)
         self._parse_fat_values(fat_image)
         self._parse_data_area(fat_image)
 
@@ -132,13 +133,13 @@ class Fat32Reader:
         if self.total_sectors == 0:
             self.total_sectors = bytes_parser.parse_int_unsigned(0x20, 4)
 
-    def _read_and_valid_fs_info(self, fat_image):
+    def _read_and_validate_fs_info(self, fat_image):
         fs_info_bytes = self._sector_slice(fat_image, self._fs_info_sector)
         if (fs_info_bytes[0:4] != b'\x52\x52\x61\x41' or
                     fs_info_bytes[0x1E4:0x1E4 + 4] != b'\x72\x72\x41\x61' or
                     fs_info_bytes[0x1FC:0x1FC + 4] != b'\x00\x00\x55\xAA'):
             raise ValueError("Incorrect format of FS Info sector")
-        # parser = BytesParser(fs_info_bytes)
+            # parser = BytesParser(fs_info_bytes)
 
     def _sectors_to_bytes(self, sectors):
         return self.bytes_per_sector * sectors
@@ -270,3 +271,13 @@ class Fat32Reader:
             return table_value
         else:
             raise EOFError
+
+    def _validate_fat(self, fat_image):
+        prev_fat = None
+        for i in range(self.fat_amount):
+            fat = self._get_fat(fat_image, i)
+            if prev_fat is not None and prev_fat != fat:
+                raise ValueError(
+                    "File allocation tables №{0} and №{1} are not equal!"
+                        .format(str(i), str(i - 1)))
+            prev_fat = fat
