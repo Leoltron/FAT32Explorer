@@ -75,6 +75,22 @@ def print_dir_help():
         " its subdirectories.\n")
 
 
+def save_file_at_external(file, path):
+    path = path.replace("\\", "/")
+
+    splitted_path = path.rsplit("/", maxsplit=1)
+    directory = splitted_path[0] if len(splitted_path) > 1 else ""
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory)
+    if file.is_directory:
+        for dir_file in file.content:
+            save_file_at_external(dir_file, path + "/" + dir_file.name)
+    else:
+        with open(path, "wb") as system_file:
+            if file.content:
+                system_file.write(file.content)
+
+
 class DirectoryBrowser:
     def __init__(self, root_directory):
         self.root = self.current = root_directory
@@ -111,6 +127,7 @@ class DirectoryBrowser:
               "open <file>             - cd, if file is a directory, otherwise"
               " make a "
               "temporary copy of the file and try to open it trough system\n"
+              "copyToExternal          - copy file to external path"
               "type <file> <encoding>  - prints file content as if it were "
               "text file\n"
               "hex <file> <line length>- prints file content"
@@ -214,6 +231,20 @@ class DirectoryBrowser:
         print("\tLast opened: " + file.last_open_date.strftime("%d.%m.%Y"))
         print("\tSize: " + file.get_size_str())
 
+    @reg_command(_commands, "copyToExternal")
+    def copy_to_external(self, args):
+        splitted_args = args.split(' ', maxsplit=1)
+        if len(splitted_args) < 2 or splitted_args[0] == "/?":
+            raise DirectoryBrowserError("Usage: copyToExternal "
+                                        "<image path> <external path>")
+        image_file_path = splitted_args[0]
+        external_file_path = splitted_args[1]
+
+        file = self.find(image_file_path)
+        if file is None:
+            raise DirectoryBrowserError(image_file_path + " not found.")
+        save_file_at_external(file, external_file_path)
+
     @reg_command(_commands, "open")
     def open(self, args):
         file = self.find(args)
@@ -224,13 +255,7 @@ class DirectoryBrowser:
             self.current = file
         else:
             path = "temp" + file.get_absolute_path()
-            splitted_path = path.rsplit("/", maxsplit=1)
-            directory = splitted_path[0] if len(splitted_path) > 1 else ""
-            if directory and not os.path.exists(directory):
-                os.makedirs(directory)
-            with open(path, "wb") as system_file:
-                if file.content:
-                    system_file.write(file.content)
+            save_file_at_external(file, path)
 
             if sys.platform == 'linux2':
                 subprocess.call(["xdg-open", path])
