@@ -92,8 +92,9 @@ def save_file_at_external(file, path):
 
 
 class DirectoryBrowser:
-    def __init__(self, root_directory):
+    def __init__(self, root_directory, fat_reader):
         self.root = self.current = root_directory
+        self._fat_reader = fat_reader
         self._int_running = False
 
     def start_interactive_mode(self):
@@ -308,6 +309,21 @@ class DirectoryBrowser:
                     line += " "
                 line += format(byte_content[part], '02x')
             print(line)
+
+    @reg_command(_commands, "copy_to_image")
+    def copy_to_image(self, args):
+        splitted_args = args.split(" ")
+
+        external_path = splitted_args[0]
+        image_path = splitted_args[1]
+
+        try:
+            file = fs_objects.get_file_from_external(external_path)
+            self._fat_reader.writeToImage(file, image_path)
+        except Exception as e:
+            raise DirectoryBrowserError(str(e))
+
+    # write to browser
 
 
 class DirectoryBrowserError(Exception):

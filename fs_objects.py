@@ -1,6 +1,11 @@
 # !/usr/bin/env python3
 import datetime
 
+import os
+import re
+
+from pathlib import Path
+
 READ_ONLY = 0x01
 HIDDEN = 0x02
 SYSTEM = 0x04
@@ -10,6 +15,7 @@ ARCHIVE = 0x20
 LFN = READ_ONLY | HIDDEN | SYSTEM | VOLUME_ID
 
 DEBUG_MODE = False
+
 
 class File:
     content = None
@@ -144,6 +150,59 @@ class File:
                 hierarchy[file.name] = file.get_dir_hierarchy()
         return hierarchy
 
+    def to_directory_entry(self, start_cluster):
 
 def eq_debug(one, other):
     print(str(one) + (" == " if one == other else" != ") + str(other))
+
+
+def get_file_from_external(external_name) -> File:
+    external_path = Path(external_name)
+    if not external_path.exists():
+        raise FileNotFoundError('File "{}" not found.'.format(external_name))
+
+    name = external_name.replace("\\", "/").rsplit("/", maxsplit=1)[-1]
+
+    short_name_splitted = get_short_name(name)
+    short_name = short_name_splitted[0] + (("." + short_name_splitted[1])
+                                           if short_name_splitted[1] else "")
+
+    file = File(short_name=short_name, long_name=name)
+
+    if external_path.is_dir():
+        size = 0
+        file.attributes = DIRECTORY
+        file.content = list()
+        for name in os.listdir(str(external_path.resolve())):
+            dir_file = get_file_from_external(
+                external_name.replace("\\", "/") + "/" + name)
+            file.content.append(dir_file)
+            size += dir_file.size_bytes
+        file._size_bytes = size
+    else:
+        file.content = open(external_name, "rb").read()
+        file._size_bytes = len(file.content)
+
+    return file
+
+
+def get_short_name(name):
+    splitted_name = name.rsplit('.', maxsplit=1)
+    name = splitted_name[0]
+    extension = "" if len(splitted_name) == 1 else splitted_name[1]
+
+    name = name.replace(".", "")
+    name = re.sub(r"[^a-zA-Z]", "_", name)
+    if len(name) > 8:
+        name = name[:6] + "~1"
+
+    extension = extension[:3]
+
+    return name.upper(), extension.upper()
+
+
+def requires_lfn(name):
+    short_name_splitted = get_short_name(name)
+    short_name = short_name_splitted[0] + (("." + short_name_splitted[1])
+                                           if short_name_splitted[1] else "")
+    return name != short_name
