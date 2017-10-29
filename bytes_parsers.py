@@ -73,6 +73,9 @@ class BytesParser:
             2:-1].upper()
         return ' '.join(a + b for a, b in zip(h[::2], h[1::2]))
 
+    def __len__(self):
+        return len(self.byte_arr)
+
 
 # noinspection PyMissingConstructor
 class FileBytesParser(BytesParser):

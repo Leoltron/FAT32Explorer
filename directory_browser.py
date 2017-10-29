@@ -4,7 +4,7 @@ import subprocess
 import os
 import sys
 import fs_objects
-from bytes_parsers import FileBytesParser
+from bytes_parsers import FileBytesParser, BytesParser
 
 DATETIME_FORMAT = "%d.%m.%Y %H:%M:%S"
 
@@ -268,17 +268,17 @@ class DirectoryBrowser:
 
     @reg_command(_commands, "type")
     def type(self, args):
-        args_splitted = args.rsplit(" ", maxsplit=1)
+        args_splitted = args.split(" ", maxsplit=1)
         if len(args_splitted) != 2:
-            raise DirectoryBrowserError('Usage: type <file> <encoding>')
-        file_name = args_splitted[0]
-        encoding = args_splitted[1]
+            raise DirectoryBrowserError('Usage: type <encoding> <file>')
+        encoding = args_splitted[0]
+        file_name = args_splitted[1]
         file = self.find(file_name, priority="file")
         if file is None:
-            raise DirectoryBrowserError('File "' + args + '" not found.')
+            raise DirectoryBrowserError('File "' + file_name + '" not found.')
         if file.is_directory:
-            raise DirectoryBrowserError('"' + args + '" is a directory.')
-        bytes_parser = FileBytesParser(file.content)
+            raise DirectoryBrowserError('"' + file_name + '" is a directory.')
+        bytes_parser = BytesParser(file.get_file_content(self._fat_reader))
         text = bytes_parser.parse_string(0, len(bytes_parser),
                                          encoding=encoding)
         print(text)
@@ -312,7 +312,7 @@ class DirectoryBrowser:
                 line += format(byte_content[part], '02x')
             print(line)
 
-    @reg_command(_commands, "copy_to_image")
+    @reg_command(_commands, "copyToImage")
     def copy_to_image(self, args):
         splitted_args = args.split(" ")
 
@@ -321,9 +321,10 @@ class DirectoryBrowser:
 
         try:
             file = self._fat_reader.writeToImage(external_path, image_path)
-            # write file to browser
+            # TODO: write file to browser
         except Exception as e:
             raise DirectoryBrowserError(str(e))
+
 
 class DirectoryBrowserError(Exception):
     def __init__(self, message):
