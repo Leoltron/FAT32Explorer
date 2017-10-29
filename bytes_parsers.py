@@ -14,13 +14,19 @@ class BytesParser:
     def __init__(self, byte_arr):
         self.byte_arr = byte_arr
 
+    def get_bytes(self, start, length):
+        return self.get_bytes_end(start, start + length)
+
+    def get_bytes_end(self, start, end):
+        return self.byte_arr[start:end]
+
     def parse_int_unsigned(self, start, length, byteorder='little'):
-        return int.from_bytes(self.byte_arr[start:start + length],
+        return int.from_bytes(self.get_bytes(start, length),
                               byteorder=byteorder, signed=False)
 
     def parse_string(self, start, length, encoding, errors="strict"):
-        return self.byte_arr[start: start + length].decode(encoding=encoding,
-                                                           errors=errors)
+        return self.get_bytes(start, length).decode(encoding=encoding,
+                                                    errors=errors)
 
     def parse_time_date(self, start):
         parsed_time = self.parse_time(start)
@@ -63,9 +69,29 @@ class BytesParser:
 
     def hex_readable(self, start, length):
         import binascii
-        h = str(binascii.hexlify(self.byte_arr[start: start + length]))[
+        h = str(binascii.hexlify(self.get_bytes(start, length)))[
             2:-1].upper()
         return ' '.join(a + b for a, b in zip(h[::2], h[1::2]))
 
-    def __len__(self):
-        return len(self.byte_arr)
+
+# noinspection PyMissingConstructor
+class FileBytesParser(BytesParser):
+    def __init__(self, file, start=0):
+        if file is None:
+            raise ValueError("file cannot be None!")
+        self.file = file
+        self._start = start
+
+    def get_bytes(self, start, length):
+        self.file.seek(self._start + start)
+        return self.file.read(length)
+
+    def get_bytes_end(self, start, end):
+        length = end - start
+
+        if length < 0:
+            raise ValueError("Length must be positive!")
+        elif length == 0:
+            return b''
+
+        return self.get_bytes(start, length)

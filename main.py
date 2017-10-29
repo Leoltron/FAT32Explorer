@@ -52,15 +52,10 @@ def main():
         print('"' + image_file_name + '" is not a file.')
         return
 
-    fi = open(image_file_name, "rb")
-    try:
-        f = fat_reader.Fat32Reader(fi.read())
-    finally:
-        fi.close()
-    print("Image successfully parsed.")
-    d = f.get_root_directory()
-    DirectoryBrowser(d).start_interactive_mode()
-
+    with open(image_file_name, "r+b") as fi:
+        f = fat_reader.Fat32Reader(fi)
+        print("Image successfully parsed.")
+        DirectoryBrowser(f).start_interactive_mode()
 
 if __name__ == '__main__':
     main()

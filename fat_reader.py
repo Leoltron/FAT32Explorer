@@ -1,7 +1,7 @@
 # !/usr/bin/env python3
 import itertools
 from datetime import timedelta
-from bytes_parser import BytesParser
+from bytes_parsers import FileBytesParser, BytesParser
 
 import fs_objects
 
@@ -77,36 +77,20 @@ def parse_file_info(entry_parser, long_file_name_buffer=""):
 
 
 class Fat32Reader:
-    def __init__(self, fat_image):
-        self._read_fat32_boot_sector(fat_image)
-        self._read_and_validate_fs_info(fat_image)
-        self._validate_fat(fat_image)
-        self._parse_fat_values(fat_image)
-        self._parse_data_area(fat_image)
+    def __init__(self, fat_image_file):
+        self._fat_image_file = fat_image_file
+        self._read_fat32_boot_sector()
+        self._read_and_validate_fs_info()
+        self._validate_fat()
+        self._parse_data_area()
 
-    def _parse_fat_values(self, fat_image):
-        active_fat = self._get_active_fat(fat_image)
-        fat_parser = BytesParser(active_fat)
+    def _parse_data_area(self):
+        self._data_area_start = self._sectors_to_bytes(self.reserved_sectors
+                                                       + self.fat_amount
+                                                       * self.sectors_per_fat)
 
-        self.fat_values = list()
-        for i in range(0, len(active_fat) - BYTES_PER_FAT32_ENTRY,
-                       BYTES_PER_FAT32_ENTRY):
-            self.fat_values.append(format_fat_address(
-                fat_parser.parse_int_unsigned(i, BYTES_PER_FAT32_ENTRY)))
-
-    def _parse_data_area(self, fat_image):
-        start = self._sectors_to_bytes(self.reserved_sectors
-                                       + self.fat_amount
-                                       * self.sectors_per_fat)
-        self.data = list()
-        bytes_per_cluster = self.bytes_per_sector * self.sectors_per_cluster
-        for cluster_start in range(start, len(fat_image) - bytes_per_cluster,
-                                   bytes_per_cluster):
-            self.data.append(fat_image[cluster_start:cluster_start +
-                                                     bytes_per_cluster])
-
-    def _read_fat32_boot_sector(self, fat_image):
-        bytes_parser = BytesParser(fat_image)
+    def _read_fat32_boot_sector(self):
+        bytes_parser = FileBytesParser(self._fat_image_file)
         self._parse_boot_sector(bytes_parser)
 
         self.sectors_per_fat = bytes_parser.parse_int_unsigned(0x24, 4)
@@ -133,8 +117,8 @@ class Fat32Reader:
         if self.total_sectors == 0:
             self.total_sectors = bytes_parser.parse_int_unsigned(0x20, 4)
 
-    def _read_and_validate_fs_info(self, fat_image):
-        fs_info_bytes = self._sector_slice(fat_image, self._fs_info_sector)
+    def _read_and_validate_fs_info(self):
+        fs_info_bytes = self._sector_slice(self._fs_info_sector)
         if (fs_info_bytes[0:4] != b'\x52\x52\x61\x41' or
                     fs_info_bytes[0x1E4:0x1E4 + 4] != b'\x72\x72\x41\x61' or
                     fs_info_bytes[0x1FC:0x1FC + 4] != b'\x00\x00\x55\xAA'):
@@ -144,32 +128,40 @@ class Fat32Reader:
     def _sectors_to_bytes(self, sectors):
         return self.bytes_per_sector * sectors
 
-    def _sector_slice(self, data, start_sector, end_sector=None):
+    def _sector_slice(self, start_sector, end_sector=None):
         if end_sector is None:
-            return self._sector_slice(data, start_sector, start_sector + 1)
-        else:
-            return data[
-                   self._sectors_to_bytes(start_sector):
-                   self._sectors_to_bytes(end_sector)]
+            end_sector = start_sector + 1
+        start = self._sectors_to_bytes(start_sector)
+        end = self._sectors_to_bytes(end_sector)
+        length = end - start
+        self._fat_image_file.seek(start)
+        return self._fat_image_file.read(length)
 
-    def _cluster_slice(self, data, start_cluster, end_cluster):
-        return self._sector_slice(data,
-                                  start_cluster * self.sectors_per_cluster,
-                                  end_cluster * self.sectors_per_cluster)
+    def _cluster_slice(self, start_cluster, end_cluster=None):
+        if end_cluster is None:
+            end_cluster = start_cluster + 1
+        return self._sector_slice(
+            start_cluster * self.sectors_per_cluster,
+            end_cluster * self.sectors_per_cluster
+        )
 
-    def _get_active_fat(self, fat_image):
-        return self._get_fat(fat_image, self.active_fat_number)
+    def _get_active_fat_start_end_sectors(self):
+        return self._get_fat_start_end_sectors(self.active_fat_number)
 
-    def _get_fat(self, fat_image, fat_number):
+    def _get_fat(self, fat_number):
+        start, end = self._get_fat_start_end_sectors(fat_number)
+        return self._sector_slice(start, end)
+
+    def _get_fat_start_end_sectors(self, fat_number):
         start = self.reserved_sectors + fat_number * self.sectors_per_fat
         end = start + self.sectors_per_fat
-        return self._sector_slice(fat_image, start, end)
+        return start, end
 
     def get_root_directory(self):
         root = fs_objects.File("", "", fs_objects.DIRECTORY, None, None, None,
                                0)
         root.content = self._parse_dir_files(
-            self._get_data_from_cluster_chain(self.root_catalog_first_cluster),
+            self.get_data_from_cluster_chain(self.root_catalog_first_cluster),
             root)
         for file in root.content:
             root._size_bytes += file._size_bytes
@@ -228,31 +220,34 @@ class Fat32Reader:
 
         name = "directory" if file.is_directory else "file"
         debug("Parsing content for " + name + " \"" + file.name + "\" ...")
-        content = self._get_file_content(entry_parser, file)
-        if content is None:
-            content = b""
-        file.content = content
+        file.content = self._parse_file_content(entry_parser, file)
         debug(
             "Parsing content for " + name + " \"" + file.name + "\" completed")
 
         return file
 
-    def _get_file_content(self, entry_parser, file):
-        first_cluster = parse_file_first_cluster_number(entry_parser)
+    def _parse_file_content(self, entry_parser, file):
+        first_cluster = file._start_cluster = \
+            parse_file_first_cluster_number(entry_parser)
+
         if first_cluster == 0:
             debug("EMPTY")
-            return list() if file.is_directory else bytes()
-        content = self._get_data_from_cluster_chain(first_cluster)
-        if file.is_directory:
-            content = self._parse_dir_files(content, file)
-        elif file._size_bytes < len(content):
-            content = content[:file._size_bytes]
-        return content
+            return list() if file.is_directory else None
+
+        return None if not file.is_directory else \
+            self._parse_dir_files(
+                self.get_data_from_cluster_chain(first_cluster), file
+            )
 
     def _get_data(self, cluster):
-        return self.data[cluster - 2]
+        parser = FileBytesParser(self._fat_image_file, self._data_area_start)
+        start = self._sectors_to_bytes(
+            self.sectors_per_cluster * (cluster - 2))
+        end = self._sectors_to_bytes(
+            self.sectors_per_cluster * (cluster - 2 + 1))
+        return parser.get_bytes_end(start, end)
 
-    def _get_data_from_cluster_chain(self, first_cluster):
+    def get_data_from_cluster_chain(self, first_cluster):
         current_cluster = first_cluster
         data = bytes()
         cluster_chain = str(first_cluster)
@@ -266,18 +261,27 @@ class Fat32Reader:
                 return data
 
     def _get_next_file_cluster(self, prev_cluster):
-        table_value = self.fat_values[prev_cluster]
+        table_value = self.get_fat_value(prev_cluster)
         if table_value < 0x0FFFFFF7:
             return table_value
         else:
             raise EOFError
 
-    def _validate_fat(self, fat_image):
+    def _validate_fat(self):
         prev_fat = None
         for i in range(self.fat_amount):
-            fat = self._get_fat(fat_image, i)
+            fat = self._get_fat(i)
             if prev_fat is not None and prev_fat != fat:
                 raise ValueError(
                     "File allocation tables №{0} and №{1} are not equal!"
                         .format(str(i), str(i - 1)))
             prev_fat = fat
+
+    def get_fat_value(self, cluster):
+        active_fat_start, _ = self._get_active_fat_start_end_sectors()
+        fat_parser = FileBytesParser(self._fat_image_file,
+                                     active_fat_start * self.bytes_per_sector)
+
+        value_start = cluster * BYTES_PER_FAT32_ENTRY
+        return format_fat_address(
+            fat_parser.parse_int_unsigned(value_start, BYTES_PER_FAT32_ENTRY))

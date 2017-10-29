@@ -4,7 +4,7 @@ import subprocess
 import os
 import sys
 import fs_objects
-from bytes_parser import BytesParser
+from bytes_parsers import FileBytesParser
 
 DATETIME_FORMAT = "%d.%m.%Y %H:%M:%S"
 
@@ -75,7 +75,7 @@ def print_dir_help():
         " its subdirectories.\n")
 
 
-def save_file_at_external(file, path):
+def save_file_at_external(file, path, fat_reader):
     path = path.replace("\\", "/")
 
     splitted_path = path.rsplit("/", maxsplit=1)
@@ -84,16 +84,18 @@ def save_file_at_external(file, path):
         os.makedirs(directory)
     if file.is_directory:
         for dir_file in file.content:
-            save_file_at_external(dir_file, path + "/" + dir_file.name)
+            save_file_at_external(dir_file, path + "/" + dir_file.name,
+                                  fat_reader)
     else:
+        file_content = file.get_file_content(fat_reader)
         with open(path, "wb") as system_file:
-            if file.content:
-                system_file.write(file.content)
+            if file_content:
+                system_file.write(file_content)
 
 
 class DirectoryBrowser:
-    def __init__(self, root_directory, fat_reader):
-        self.root = self.current = root_directory
+    def __init__(self, fat_reader):
+        self.root = self.current = fat_reader.get_root_directory()
         self._fat_reader = fat_reader
         self._int_running = False
 
@@ -244,7 +246,7 @@ class DirectoryBrowser:
         file = self.find(image_file_path)
         if file is None:
             raise DirectoryBrowserError(image_file_path + " not found.")
-        save_file_at_external(file, external_file_path)
+        save_file_at_external(file, external_file_path, self._fat_reader)
 
     @reg_command(_commands, "open")
     def open(self, args):
@@ -256,7 +258,7 @@ class DirectoryBrowser:
             self.current = file
         else:
             path = "temp" + file.get_absolute_path()
-            save_file_at_external(file, path)
+            save_file_at_external(file, path, self._fat_reader)
 
             if sys.platform == 'linux2':
                 subprocess.call(["xdg-open", path])
@@ -276,7 +278,7 @@ class DirectoryBrowser:
             raise DirectoryBrowserError('File "' + args + '" not found.')
         if file.is_directory:
             raise DirectoryBrowserError('"' + args + '" is a directory.')
-        bytes_parser = BytesParser(file.content)
+        bytes_parser = FileBytesParser(file.content)
         text = bytes_parser.parse_string(0, len(bytes_parser),
                                          encoding=encoding)
         print(text)
@@ -301,7 +303,7 @@ class DirectoryBrowser:
             raise DirectoryBrowserError('File "' + args + '" not found.')
         if file.is_directory:
             raise DirectoryBrowserError('"' + args + '" is a directory.')
-        byte_content = file.content
+        byte_content = file.get_file_content(self._fat_reader)
         for start in range(0, len(byte_content), line_len):
             line = ""
             for part in range(start, min(start + line_len, len(byte_content))):
@@ -318,13 +320,10 @@ class DirectoryBrowser:
         image_path = splitted_args[1]
 
         try:
-            file = fs_objects.get_file_from_external(external_path)
-            self._fat_reader.writeToImage(file, image_path)
+            file = self._fat_reader.writeToImage(external_path, image_path)
+            # write file to browser
         except Exception as e:
             raise DirectoryBrowserError(str(e))
-
-    # write to browser
-
 
 class DirectoryBrowserError(Exception):
     def __init__(self, message):
