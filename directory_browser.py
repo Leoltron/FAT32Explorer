@@ -93,10 +93,34 @@ def save_file_at_external(file, path, fat_reader):
                 system_file.write(file_content)
 
 
+def find(name, source, priority=None) -> fs_objects.File:
+    dirs = name.split("/", maxsplit=1)
+    if len(dirs) > 1:
+        return find(dirs[1], source=find(dirs[0], source=source,
+                                         priority="directory"),
+                    priority=priority)
+    if name == ".":
+        return source
+    elif name == "..":
+        return source.parent
+    file_found = None
+    for file in source.content:
+        if file.name == name:
+            if priority is None or (
+                            priority == "directory" and file.is_directory
+            ) or (
+                            priority == "file" and not file.is_directory):
+                return file
+            else:
+                file_found = file
+    return file_found
+
+
 class DirectoryBrowser:
-    def __init__(self, fat_reader):
-        self.root = self.current = fat_reader.get_root_directory()
-        self._fat_reader = fat_reader
+    def __init__(self, fat_editor=None, root=None):
+        self.root = self.current = fat_editor.get_root_directory() \
+            if root is None else root
+        self._fat_editor = fat_editor
         self._int_running = False
 
     def start_interactive_mode(self):
@@ -110,6 +134,7 @@ class DirectoryBrowser:
             except Exception:
                 dispose_temp_files()
                 raise
+        dispose_temp_files()
 
     _commands = dict()
 
@@ -141,7 +166,6 @@ class DirectoryBrowser:
     @reg_command(_commands, "quit")
     def stop_interactive_mode(self, args):
         self._int_running = False
-        dispose_temp_files()
 
     @reg_command(_commands, "cd")
     def change_directory(self, args):
@@ -171,32 +195,6 @@ class DirectoryBrowser:
                 raise DirectoryBrowserError(path + " is not a directory.")
             else:
                 self.current = file
-
-    def find(self, name, source=None, priority=None) -> fs_objects.File:
-        if source is None:
-            source = self.current
-        dirs = name.split("/", maxsplit=1)
-        if len(dirs) > 1:
-            return self.find(dirs[1], source=self.find(dirs[0], source=source,
-                                                       priority="directory"),
-                             priority=priority)
-
-        if name == ".":
-            return source
-        elif name == "..":
-            return source.parent
-
-        file_found = None
-        for file in source.content:
-            if file.name == name:
-                if priority is None or (
-                                priority == "directory" and file.is_directory
-                ) or (
-                                priority == "file" and not file.is_directory):
-                    return file
-                else:
-                    file_found = file
-        return file_found
 
     def _get_parent_dir(self):
         if self.current.parent is not None:
@@ -246,7 +244,7 @@ class DirectoryBrowser:
         file = self.find(image_file_path)
         if file is None:
             raise DirectoryBrowserError(image_file_path + " not found.")
-        save_file_at_external(file, external_file_path, self._fat_reader)
+        save_file_at_external(file, external_file_path, self._fat_editor)
 
     @reg_command(_commands, "open")
     def open(self, args):
@@ -258,7 +256,7 @@ class DirectoryBrowser:
             self.current = file
         else:
             path = "temp" + file.get_absolute_path()
-            save_file_at_external(file, path, self._fat_reader)
+            save_file_at_external(file, path, self._fat_editor)
 
             if sys.platform == 'linux2':
                 subprocess.call(["xdg-open", path])
@@ -278,7 +276,7 @@ class DirectoryBrowser:
             raise DirectoryBrowserError('File "' + file_name + '" not found.')
         if file.is_directory:
             raise DirectoryBrowserError('"' + file_name + '" is a directory.')
-        bytes_parser = BytesParser(file.get_file_content(self._fat_reader))
+        bytes_parser = BytesParser(file.get_file_content(self._fat_editor))
         text = bytes_parser.parse_string(0, len(bytes_parser),
                                          encoding=encoding)
         print(text)
@@ -303,7 +301,7 @@ class DirectoryBrowser:
             raise DirectoryBrowserError('File "' + args + '" not found.')
         if file.is_directory:
             raise DirectoryBrowserError('"' + args + '" is a directory.')
-        byte_content = file.get_file_content(self._fat_reader)
+        byte_content = file.get_file_content(self._fat_editor)
         for start in range(0, len(byte_content), line_len):
             line = ""
             for part in range(start, min(start + line_len, len(byte_content))):
@@ -320,10 +318,15 @@ class DirectoryBrowser:
         image_path = splitted_args[1]
 
         try:
-            file = self._fat_reader.writeToImage(external_path, image_path)
+            file = self._fat_editor.write_to_image(external_path, image_path)
             # TODO: write file to browser
         except Exception as e:
             raise DirectoryBrowserError(str(e))
+
+    def find(self, name, source=None, priority=None) -> fs_objects.File:
+        if source is None:
+            source = self.current
+        return find(name=name, source=source, priority=priority)
 
 
 class DirectoryBrowserError(Exception):

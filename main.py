@@ -31,7 +31,7 @@
 #   3. 2 образа: нормальный и с ошибками
 
 import sys
-import fat_reader
+import fat_editor
 from directory_browser import DirectoryBrowser
 from pathlib import Path
 
@@ -53,9 +53,10 @@ def main():
         return
 
     with open(image_file_name, "r+b") as fi:
-        f = fat_reader.Fat32Reader(fi)
+        f = fat_editor.Fat32Editor(fi)
         print("Image successfully parsed.")
-        DirectoryBrowser(f).start_interactive_mode()
+        DirectoryBrowser(fat_editor=f).start_interactive_mode()
+
 
 if __name__ == '__main__':
     main()

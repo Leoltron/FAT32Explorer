@@ -1,6 +1,10 @@
 # !/usr/bin/env python3
 import itertools
 from datetime import timedelta
+
+import math
+
+import directory_browser
 from bytes_parsers import FileBytesParser, BytesParser
 
 import fs_objects
@@ -76,7 +80,14 @@ def parse_file_info(entry_parser, long_file_name_buffer=""):
                            file_size_bytes)
 
 
-class Fat32Reader:
+def validate_fs_info(fs_info_bytes):
+    if (fs_info_bytes[0:4] != b'\x52\x52\x61\x41' or
+                fs_info_bytes[0x1E4:0x1E4 + 4] != b'\x72\x72\x41\x61' or
+                fs_info_bytes[0x1FC:0x1FC + 4] != b'\x00\x00\x55\xAA'):
+        raise ValueError("Incorrect format of FS Info sector")
+
+
+class Fat32Editor:
     def __init__(self, fat_image_file):
         self._fat_image_file = fat_image_file
         self._read_fat32_boot_sector()
@@ -119,11 +130,17 @@ class Fat32Reader:
 
     def _read_and_validate_fs_info(self):
         fs_info_bytes = self._sector_slice(self._fs_info_sector)
-        if (fs_info_bytes[0:4] != b'\x52\x52\x61\x41' or
-                    fs_info_bytes[0x1E4:0x1E4 + 4] != b'\x72\x72\x41\x61' or
-                    fs_info_bytes[0x1FC:0x1FC + 4] != b'\x00\x00\x55\xAA'):
-            raise ValueError("Incorrect format of FS Info sector")
-            # parser = BytesParser(fs_info_bytes)
+        validate_fs_info(fs_info_bytes)
+
+        parser = BytesParser(fs_info_bytes)
+        self._free_clusters = \
+            parser.parse_int_unsigned(0x1e8, 4, byteorder='little')
+        if self._free_clusters == 0xFFFFFFFF:
+            self._free_clusters = -1
+        self._first_free_cluster = \
+            parser.parse_int_unsigned(0x1ec, 4, byteorder='little')
+        if self._first_free_cluster == 0xFFFFFFFF:
+            self._first_free_cluster = -1
 
     def _sectors_to_bytes(self, sectors):
         return self.bytes_per_sector * sectors
@@ -163,8 +180,6 @@ class Fat32Reader:
         root.content = self._parse_dir_files(
             self.get_data_from_cluster_chain(self.root_catalog_first_cluster),
             root)
-        for file in root.content:
-            root._size_bytes += file._size_bytes
         return root
 
     def _parse_dir_files(self, data, directory):
@@ -241,11 +256,15 @@ class Fat32Reader:
 
     def _get_data(self, cluster):
         parser = FileBytesParser(self._fat_image_file, self._data_area_start)
-        start = self._sectors_to_bytes(
-            self.sectors_per_cluster * (cluster - 2))
-        end = self._sectors_to_bytes(
-            self.sectors_per_cluster * (cluster - 2 + 1))
+        start, end = self._get_cluster_start_end(cluster)
         return parser.get_bytes_end(start, end)
+
+    def _get_cluster_start_end(self, cluster_number):
+        start = self._sectors_to_bytes(
+            self.sectors_per_cluster * (cluster_number - 2))
+        end = self._sectors_to_bytes(
+            self.sectors_per_cluster * (cluster_number - 2 + 1))
+        return start, end
 
     def get_data_from_cluster_chain(self, first_cluster):
         current_cluster = first_cluster
@@ -285,3 +304,166 @@ class Fat32Reader:
         value_start = cluster * BYTES_PER_FAT32_ENTRY
         return format_fat_address(
             fat_parser.parse_int_unsigned(value_start, BYTES_PER_FAT32_ENTRY))
+
+    def _write_fat_value(self, cluster, value):
+        self._write_fat_bytes(cluster,
+                              int.to_bytes(
+                                  value,
+                                  length=BYTES_PER_FAT32_ENTRY,
+                                  byteorder='little'
+                              ))
+
+    def _write_eof_fat_value(self, cluster):
+        self._write_fat_bytes(cluster, b'\xff' * BYTES_PER_FAT32_ENTRY)
+
+    def _write_fat_bytes(self, cluster, bytes_):
+        active_fat_start, _ = self._get_active_fat_start_end_sectors()
+
+        value_start = active_fat_start * self.bytes_per_sector + cluster * BYTES_PER_FAT32_ENTRY
+        self._fat_image_file.seek(value_start)
+        self._fat_image_file.write(bytes_)
+
+    def _find_free_clusters(self, clusters_amount):
+        required = clusters_amount
+        if clusters_amount < 0:
+            raise ValueError("Cluster amount cannot be negative!")
+        if clusters_amount == 0:
+            return list()
+
+        free_clusters = list()
+        start_sector, end_sector = self._get_active_fat_start_end_sectors()
+        fat = self._sector_slice(start_sector, end_sector)
+        fat_parser = BytesParser(fat)
+
+        empty_fat_value = b'/x00' * BYTES_PER_FAT32_ENTRY
+        for i in range(2 * BYTES_PER_FAT32_ENTRY,
+                       len(fat), BYTES_PER_FAT32_ENTRY):
+            if clusters_amount == 0:
+                break
+            value = fat_parser.get_bytes(i, BYTES_PER_FAT32_ENTRY)
+            if value == empty_fat_value:
+                free_clusters.append(i // BYTES_PER_FAT32_ENTRY)
+                clusters_amount -= 1
+        if clusters_amount > 0:
+            raise ValueError("Have not found enough free clusters "
+                             "(Required: {}, Found: {})."
+                             .format(required, required - clusters_amount))
+        return free_clusters
+
+    def write_to_image(self, external_path, internal_path):
+        """
+        Записывает файл в соотв. путь
+        """
+        root = self.get_root_directory()
+        dir = directory_browser.find(
+            name=internal_path,
+            source=root,
+            priority='directory')
+        if dir is None:
+            raise directory_browser. \
+                DirectoryBrowserError('"' + internal_path + '" not found.')
+        if not dir.is_directory:
+            raise directory_browser. \
+                DirectoryBrowserError(
+                '"' + internal_path + '" is not a directory.')
+
+            # TODO: find external file, make a file, translate into dir entry(ies), append to dir content, write content
+
+    def _write_content_and_get_first_cluster(self, content):
+        """
+        Записывает данные и возвращает номер первого кластера
+        """
+        if len(content) == 0:
+            return -1
+        cluster_size = self.sectors_per_cluster * self.bytes_per_sector
+        clusters_required = math.ceil(len(content) / cluster_size)
+        clusters = self._find_free_clusters(clusters_required)
+        prev_cluster = -1
+
+        for content_start, cluster_num in \
+                zip(range(0, len(content), cluster_size), clusters):
+            if prev_cluster != -1:
+                self._write_fat_value(prev_cluster, cluster_num)
+            content_end = content_start + cluster_size
+
+            cluster_start, _ = self._get_cluster_start_end(cluster_num)
+
+            self._fat_image_file.seek(cluster_start)
+            self._fat_image_file.write(content[content_start:content_end])
+
+            prev_cluster = cluster_num
+
+        self._write_eof_fat_value(clusters[-1])
+        return clusters[0]
+
+    def _append_content_to_dir(self, directory, entries):
+        pass
+        # entries_required
+
+    def _get_cluster_chain(self, first_cluster):
+        cluster_chain = [first_cluster]
+        current_cluster = first_cluster
+        while True:
+            try:
+                current_cluster = self._get_next_file_cluster(current_cluster)
+                cluster_chain.append(current_cluster)
+            except EOFError:
+                break
+        return cluster_chain
+
+    def _find_dir_empty_entries(self, directory, amount_required):
+        if amount_required <= 0:
+            raise ValueError("Amount must be positive")
+        fat_parser = FileBytesParser(self._fat_image_file)
+        clusters = self._get_cluster_chain(directory._start_cluster)
+
+        entries_start = list()
+
+        data_start = self._data_area_start
+        for cluster_num in clusters:
+            start, end = self._get_cluster_start_end(cluster_num)
+            for entry_start in range(data_start + start, data_start + end,
+                                     BYTES_PER_DIR_ENTRY):
+                entry_bytes = fat_parser.get_bytes(entry_start, 1)
+                if entry_bytes[0] == 0x00 or entry_bytes[0] == 0xE5:
+                    entries_start.append(entry_start)
+                    if len(entries_start) == amount_required:
+                        return entries_start
+                else:
+                    entries_start.clear()
+
+        cluster_size = self.sectors_per_cluster * self.bytes_per_sector
+
+        entries_required = amount_required - len(entries_start)
+        clusters_required = math.ceil(
+            entries_required * BYTES_PER_DIR_ENTRY / cluster_size
+        )
+        clusters = self._get_cluster_chain(
+            self._append_clusters_to_chain(
+                last_cluster=clusters[-1],
+                clusters_required=clusters_required
+            )
+        )
+        for cluster_num in clusters:
+            start, end = self._get_cluster_start_end(cluster_num)
+            for entry_start in range(data_start + start, data_start + end,
+                                     BYTES_PER_DIR_ENTRY):
+                entries_start.append(entry_start)
+                if len(entries_start) == amount_required:
+                    return entries_start
+        raise ValueError("Unexpected error -"
+                         " appended clusters were not enough!")
+
+    def _append_clusters_to_chain(self, last_cluster, clusters_required):
+        """
+        Дополняет цепочку кластеров на clusters_required и возвращает первый
+        из номеров добавленных кластеров.
+        """
+        cluster_size = self.sectors_per_cluster * self.bytes_per_sector
+
+        first_appended_cluster = self._write_content_and_get_first_cluster(
+            clusters_required * bytes(cluster_size)
+        )
+        self._write_fat_value(last_cluster, first_appended_cluster)
+
+        return first_appended_cluster
