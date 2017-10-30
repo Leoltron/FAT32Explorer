@@ -31,9 +31,12 @@ def parse_file_first_cluster_number(entry_parser):
 
 
 def parse_creation_datetime(entry_parser):
-    creation_time_millis = entry_parser.parse_int_unsigned(13, 1)
-    creation_datetime = entry_parser.parse_time_date(14)
-    creation_datetime += timedelta(milliseconds=creation_time_millis)
+    try:
+        creation_time_millis = entry_parser.parse_int_unsigned(13, 1)
+        creation_datetime = entry_parser.parse_time_date(14)
+        creation_datetime += timedelta(milliseconds=creation_time_millis)
+    except ValueError:
+        return None
     return creation_datetime
 
 
@@ -66,8 +69,14 @@ def parse_file_info(entry_parser, long_file_name_buffer=""):
 
     creation_datetime = parse_creation_datetime(entry_parser)
 
-    last_access_date = entry_parser.parse_date(18)
-    last_modification_datetime = entry_parser.parse_time_date(22)
+    try:
+        last_access_date = entry_parser.parse_date(18)
+    except ValueError:
+        last_access_date = None
+    try:
+        last_modification_datetime = entry_parser.parse_time_date(22)
+    except ValueError:
+        last_modification_datetime = None
 
     file_size_bytes = entry_parser.parse_int_unsigned(0 + 28, 4)
 

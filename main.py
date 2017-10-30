@@ -48,9 +48,6 @@ def main():
     if not image_file_path.exists():
         print('File "' + image_file_name + '" not found.')
         return
-    if not image_file_path.is_file():
-        print('"' + image_file_name + '" is not a file.')
-        return
 
     with open(image_file_name, "r+b") as fi:
         f = fat_editor.Fat32Editor(fi)

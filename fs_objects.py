@@ -30,16 +30,24 @@ class File:
                  short_name,
                  long_name,
                  attributes=0,
-                 create_datetime=datetime.datetime.now(),
-                 last_open_date=datetime.date.today(),
-                 change_datetime=datetime.datetime.now(),
+                 create_datetime=None,
+                 last_open_date=None,
+                 change_datetime=None,
                  size_bytes=0,
                  start_cluster=-1):
         self.short_name = short_name
         self.long_name = long_name
         self.attributes = attributes
+        if create_datetime is None:
+            create_datetime = datetime.datetime.now()
         self.create_datetime = create_datetime
+
+        if last_open_date is None:
+            last_open_date = datetime.date.today()
         self.last_open_date = last_open_date
+
+        if change_datetime is None:
+            change_datetime = datetime.datetime.now()
         self.change_datetime = change_datetime
         self._size_bytes = size_bytes
         self._start_cluster = start_cluster
