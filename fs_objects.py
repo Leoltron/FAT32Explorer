@@ -6,6 +6,10 @@ import re
 
 from pathlib import Path
 
+import itertools
+
+import bytes_parsers
+
 BYTES_PER_TIB = 2 ** 40
 BYTES_PER_GIB = 2 ** 30
 BYTES_PER_MIB = 2 ** 20
@@ -163,14 +167,61 @@ class File:
                 hierarchy[file.name] = file.get_dir_hierarchy()
         return hierarchy
 
-    def to_directory_entry(self, start_cluster):
-        pass
-
     def get_file_content(self, fat_reader):
         content = fat_reader.get_data_from_cluster_chain(self._start_cluster)
         if self._size_bytes >= 0:
             return content[:self._size_bytes]
         return content
+
+    def to_directory_entries(self):
+        entries = list()
+
+        if requires_lfn(self.name):
+            entries += to_lfn_parts(self.name)
+
+        file_info_entry = bytearray(32)
+        file_info_entry[11] = self.attributes
+
+        self._write_short_name(file_info_entry)
+        self._write_dates(file_info_entry)
+        self._write_size(file_info_entry)
+        self._write_start_cluster_number(file_info_entry)
+
+        entries.append(bytes(file_info_entry))
+
+        return entries
+
+    def _write_dates(self, file_info_entry):
+        file_info_entry[14:14 + 4] = \
+            list(bytes_parsers.datetime_to_bytes(self.create_datetime))
+        file_info_entry[18:18 + 2] = list(
+            bytes_parsers.date_to_bytes(self.last_open_date))
+        file_info_entry[22:22 + 4] = \
+            list(bytes_parsers.datetime_to_bytes(self.change_datetime))
+
+    def _write_size(self, file_info_entry):
+        if not self.is_directory:
+            file_info_entry[28:28 + 4] = \
+                bytes_parsers.int_to_bytes(4, self.size_bytes, "little")
+
+    def _write_short_name(self, file_info_entry):
+        splitted_short_name = self.short_name.rsplit(".", 1)
+        name_part = splitted_short_name[0][:8]
+        name_part += (8 - len(name_part)) * " "
+        extension_part = "" if len(splitted_short_name) == 1 else \
+            splitted_short_name[1][:3]
+        extension_part += (3 - len(extension_part)) * " "
+        name_part_bytes = name_part.encode(encoding="cp866", errors="strict")
+        extension_part = extension_part.encode(encoding="cp866",
+                                               errors="strict")
+        file_info_entry[0:8] = list(name_part_bytes)
+        file_info_entry[8:11] = list(extension_part)
+
+    def _write_start_cluster_number(self, file_info_entry):
+        start_custer_number_bytes = int.to_bytes(self._start_cluster,
+                                                 length=4, byteorder='big')
+        file_info_entry[20:22] = start_custer_number_bytes[1::-1]
+        file_info_entry[26:28] = start_custer_number_bytes[4:1:-1]
 
 
 def eq_debug(one, other):
@@ -219,6 +270,33 @@ def get_short_name(name):
     extension = extension[:3]
 
     return name.upper(), extension.upper()
+
+
+def to_lfn_parts(name):
+    name_bytes = name.encode("utf_16")
+    parts = list()
+    i = 0
+    part_number = 0
+    while i < len(name_bytes):
+        part = bytearray(32)
+        for pos in get_utf16_char_pos():
+            if i < len(name_bytes):
+                part[pos] = name_bytes[i]
+                part[pos + 1] = name_bytes[i + 1]
+                i += 2
+            else:
+                break
+
+        part[0] = part_number if i < len(name) else 0x42
+        part[0x0b] = LFN
+        parts.append(bytes(part))
+        part_number += 1
+    return parts[::-1]
+
+
+def get_utf16_char_pos():
+    return itertools.chain(range(1, 11, 2), range(14, 26, 2),
+                           range(28, 32, 2))
 
 
 def requires_lfn(name):

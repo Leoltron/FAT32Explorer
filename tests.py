@@ -268,5 +268,14 @@ class DirectoryBrowserTests(unittest.TestCase):
         self.assertEqual(db.current, d1)
 
 
+class WriterTests(unittest.TestCase):
+    def test_lfn_encoding(self):
+        name = "qwertyuioiuhgfdsxdcfgtDASDASDAdd12312312.png"
+        parts = fs_objects.to_lfn_parts(name)
+        actual = ""
+        for part in parts:
+            actual = fat_editor.get_lfn_part(part) + actual
+        self.assertEqual(actual, name)
+
 if __name__ == '__main__':
     unittest.main()

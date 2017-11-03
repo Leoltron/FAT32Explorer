@@ -1,10 +1,12 @@
 # !/usr/bin/env python3
+import os
+import re
 import shutil
 import subprocess
-import os
 import sys
+
 import fs_objects
-from bytes_parsers import FileBytesParser, BytesParser
+from bytes_parsers import BytesParser
 
 DATETIME_FORMAT = "%d.%m.%Y %H:%M:%S"
 
@@ -38,6 +40,16 @@ def _parse_command_args_file_name(args):
         name = name[:-1]
     _check_for_invalid_symbols(name)
     return name
+
+
+def clear_from_screening_quotes(s):
+    if len(s) > 0 and s[0] == '"':
+        return clear_from_screening_quotes(s[1:])
+
+    if len(s) > 0 and s[-1] == '"':
+        return clear_from_screening_quotes(s[:-1])
+
+    return s
 
 
 def _check_for_invalid_symbols(name):
@@ -88,12 +100,17 @@ def save_file_at_external(file, path, fat_reader):
                                   fat_reader)
     else:
         file_content = file.get_file_content(fat_reader)
-        with open(path, "wb") as system_file:
-            if file_content:
-                system_file.write(file_content)
+        try:
+            with open(path, "wb") as system_file:
+                if file_content:
+                    system_file.write(file_content)
+        except PermissionError:
+            raise DirectoryBrowserError("Error: permission denied.")
 
 
 def find(name, source, priority=None) -> fs_objects.File:
+    if len(name) > 2 and name[0] == '"' and name[-1] == '"':
+        name = name[1:-1]
     dirs = name.split("/", maxsplit=1)
     if len(dirs) > 1:
         return find(dirs[1], source=find(dirs[0], source=source,
@@ -114,6 +131,27 @@ def find(name, source, priority=None) -> fs_objects.File:
             else:
                 file_found = file
     return file_found
+
+
+screened_file_path_regex = re.compile(r"\s*\"([^<>\"|?*]+)\"")
+file_path_regex = re.compile(r"\s*([^<>\"|?*\s]+)")
+
+
+def parse_file_args(args, amount=1):
+    parsed_args = []
+    while amount > 0:
+        match = screened_file_path_regex.match(args)
+        if match is None:
+            match = file_path_regex.match(args)
+            if match is None:
+                raise DirectoryBrowserError(
+                    "Expected {:d} arguments, got {:d}".format(
+                        amount + len(parsed_args), len(parsed_args)))
+        parsed_args.append(match.group(1))
+        match_length = len(match.group(0))
+        args = "" if match_length >= len(args) else args[match_length:]
+        amount -= 1
+    return parsed_args
 
 
 class DirectoryBrowser:
@@ -234,12 +272,14 @@ class DirectoryBrowser:
 
     @reg_command(_commands, "copyToExternal")
     def copy_to_external(self, args):
-        splitted_args = args.split(' ', maxsplit=1)
-        if len(splitted_args) < 2 or splitted_args[0] == "/?":
+        if "/?" in args:
             raise DirectoryBrowserError("Usage: copyToExternal "
                                         "<image path> <external path>")
-        image_file_path = splitted_args[0]
-        external_file_path = splitted_args[1]
+        try:
+            image_file_path, external_file_path = parse_file_args(args, 2)
+        except DirectoryBrowserError:
+            raise DirectoryBrowserError("Usage: copyToExternal "
+                                        "<image path> <external path>")
 
         file = self.find(image_file_path)
         if file is None:
@@ -312,16 +352,14 @@ class DirectoryBrowser:
 
     @reg_command(_commands, "copyToImage")
     def copy_to_image(self, args):
-        splitted_args = args.split(" ")
-
-        external_path = splitted_args[0]
-        image_path = splitted_args[1]
+        external_path, image_path = parse_file_args(args, 2)
 
         try:
             file = self._fat_editor.write_to_image(external_path, image_path)
-            # TODO: write file to browser
+            dir_ = find(image_path, source=self.current, priority='directory')
+            dir_.content.append(file)
         except Exception as e:
-            raise DirectoryBrowserError(str(e))
+            raise  # DirectoryBrowserError(str(e))
 
     def find(self, name, source=None, priority=None) -> fs_objects.File:
         if source is None:

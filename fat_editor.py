@@ -1,9 +1,9 @@
 # !/usr/bin/env python3
 import itertools
-from datetime import timedelta
-
+import datetime
 import math
-
+import pathlib
+import os
 import directory_browser
 from bytes_parsers import FileBytesParser, BytesParser
 
@@ -12,7 +12,7 @@ import fs_objects
 BYTES_PER_DIR_ENTRY = 32
 BYTES_PER_FAT32_ENTRY = 4
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 
 def debug(message):
@@ -34,7 +34,8 @@ def parse_creation_datetime(entry_parser):
     try:
         creation_time_millis = entry_parser.parse_int_unsigned(13, 1)
         creation_datetime = entry_parser.parse_time_date(14)
-        creation_datetime += timedelta(milliseconds=creation_time_millis)
+        creation_datetime += datetime.timedelta(
+            milliseconds=creation_time_millis)
     except ValueError:
         return None
     return creation_datetime
@@ -96,12 +97,36 @@ def validate_fs_info(fs_info_bytes):
         raise ValueError("Incorrect format of FS Info sector")
 
 
+def find_directory(source, internal_path):
+    dir = directory_browser.find(
+        name=internal_path,
+        source=source,
+        priority='directory')
+    if dir is None:
+        raise directory_browser. \
+            DirectoryBrowserError('"' + internal_path + '" not found.')
+    if not dir.is_directory:
+        raise directory_browser. \
+            DirectoryBrowserError(
+            '"' + internal_path + '" is not a directory.')
+    return dir
+
+
+def get_time_stamps(external_path):
+    stats = os.stat(external_path)
+    modification_datetime = datetime.datetime.fromtimestamp(stats.st_mtime)
+    creation_datetime = datetime.datetime.fromtimestamp(stats.st_ctime)
+    last_access_date = datetime.datetime. \
+        fromtimestamp(stats.st_atime).date()
+    return creation_datetime, last_access_date, modification_datetime
+
+
 class Fat32Editor:
     def __init__(self, fat_image_file):
         self._fat_image_file = fat_image_file
         self._read_fat32_boot_sector()
         self._read_and_validate_fs_info()
-        self._validate_fat()
+        # self._validate_fat()
         self._parse_data_area()
 
     def _parse_data_area(self):
@@ -185,7 +210,7 @@ class Fat32Editor:
 
     def get_root_directory(self):
         root = fs_objects.File("", "", fs_objects.DIRECTORY, None, None, None,
-                               0)
+                               0, self.root_catalog_first_cluster)
         root.content = self._parse_dir_files(
             self.get_data_from_cluster_chain(self.root_catalog_first_cluster),
             root)
@@ -265,10 +290,17 @@ class Fat32Editor:
 
     def _get_data(self, cluster):
         parser = FileBytesParser(self._fat_image_file, self._data_area_start)
-        start, end = self._get_cluster_start_end(cluster)
-        return parser.get_bytes_end(start, end)
+        start, end = self._get_cluster_start_end_relative_to_data_start(
+            cluster)
+        data = parser.get_bytes_end(start, end)
+        if DEBUG_MODE:
+            debug("Getting data from cluster " + str(cluster) + ": ")
+            debug("\tCluster start: " + str(self._data_area_start + start))
+            debug("\tCluster end: " + str(self._data_area_start + end))
+            debug("\tContent: " + BytesParser(data).hex_readable(0, len(data)))
+        return data
 
-    def _get_cluster_start_end(self, cluster_number):
+    def _get_cluster_start_end_relative_to_data_start(self, cluster_number):
         start = self._sectors_to_bytes(
             self.sectors_per_cluster * (cluster_number - 2))
         end = self._sectors_to_bytes(
@@ -326,11 +358,14 @@ class Fat32Editor:
         self._write_fat_bytes(cluster, b'\xff' * BYTES_PER_FAT32_ENTRY)
 
     def _write_fat_bytes(self, cluster, bytes_):
-        active_fat_start, _ = self._get_active_fat_start_end_sectors()
+        for i in range(self.fat_amount):
+            fat_start, _ = self._get_fat_start_end_sectors(i)
 
-        value_start = active_fat_start * self.bytes_per_sector + cluster * BYTES_PER_FAT32_ENTRY
-        self._fat_image_file.seek(value_start)
-        self._fat_image_file.write(bytes_)
+            value_start = fat_start * self.bytes_per_sector + \
+                          cluster * BYTES_PER_FAT32_ENTRY
+            self._fat_image_file.seek(value_start)
+            self._fat_image_file.write(bytes_)
+            self._fat_image_file.flush()
 
     def _find_free_clusters(self, clusters_amount):
         required = clusters_amount
@@ -344,12 +379,18 @@ class Fat32Editor:
         fat = self._sector_slice(start_sector, end_sector)
         fat_parser = BytesParser(fat)
 
-        empty_fat_value = b'/x00' * BYTES_PER_FAT32_ENTRY
-        for i in range(2 * BYTES_PER_FAT32_ENTRY,
+        empty_fat_value = b'\x00' * BYTES_PER_FAT32_ENTRY
+        for i in range(self._first_free_cluster * BYTES_PER_FAT32_ENTRY,
                        len(fat), BYTES_PER_FAT32_ENTRY):
             if clusters_amount == 0:
+                self._first_free_cluster = i // BYTES_PER_FAT32_ENTRY
+                self._update_first_free_cluster()
                 break
             value = fat_parser.get_bytes(i, BYTES_PER_FAT32_ENTRY)
+            debug("Looking to cluster #" + str(
+                i // BYTES_PER_FAT32_ENTRY) + ", content: " + str(value) + (
+                      " != " if value != empty_fat_value else " == ") + str(
+                empty_fat_value))
             if value == empty_fat_value:
                 free_clusters.append(i // BYTES_PER_FAT32_ENTRY)
                 clusters_amount -= 1
@@ -359,32 +400,100 @@ class Fat32Editor:
                              .format(required, required - clusters_amount))
         return free_clusters
 
-    def write_to_image(self, external_path, internal_path):
+    def write_to_image(self, external_path, internal_path,
+                       directory=None) -> fs_objects.File:
         """
-        Записывает файл в соотв. путь
+        Writes file to image, returns File
         """
-        root = self.get_root_directory()
-        dir = directory_browser.find(
-            name=internal_path,
-            source=root,
-            priority='directory')
-        if dir is None:
-            raise directory_browser. \
-                DirectoryBrowserError('"' + internal_path + '" not found.')
-        if not dir.is_directory:
-            raise directory_browser. \
-                DirectoryBrowserError(
-                '"' + internal_path + '" is not a directory.')
+        path = pathlib.Path(external_path)
+        if not path.exists():
+            raise FileNotFoundError(str(path) + " not found.")
 
-            # TODO: find external file, make a file, translate into dir entry(ies), append to dir content, write content
+        root = self.get_root_directory()
+        if directory is None:
+            directory = find_directory(root, internal_path)
+
+        name = ("/" + str(path).replace("\\", "/")).split("/")[-1]
+        short_name = '.'.join(fs_objects.get_short_name(name))
+        attributes = fs_objects.DIRECTORY if path.is_dir() else 0
+
+        creation_datetime, last_access_date, modification_datetime = \
+            get_time_stamps(external_path)
+
+        file = fs_objects.File(
+            long_name=name,
+            short_name=short_name,
+            create_datetime=creation_datetime,
+            change_datetime=modification_datetime,
+            last_open_date=last_access_date,
+            attributes=attributes)
+
+        first_cluster, size_bytes = self._write_external_file_content(path,
+                                                                      file)
+
+        file._start_cluster = first_cluster
+        file._size_bytes = size_bytes
+
+        self._append_content_to_dir(directory, file.to_directory_entries())
+        if DEBUG_MODE:
+            print(BytesParser(self.get_data_from_cluster_chain(
+                directory._start_cluster)).hex_readable(0,
+                                                        BYTES_PER_DIR_ENTRY))
+
+        file.parent = directory
+        return file
+
+    def _write_external_file_content(self, external_path, file):
+        cluster_size = self.get_cluster_size()
+        clusters = list()
+        size_bytes = 0
+        if external_path.is_dir():
+            file.content = list()
+            first_cluster = file._start_cluster = \
+                self._write_content_and_get_first_cluster(bytes(cluster_size))
+            for name in os.listdir(external_path):
+                path = os.path.join(external_path.absolute(), name)
+                file.content.append(self.write_to_image(path, "", file))
+        else:
+            with open(external_path, 'rb') as f:
+                f.seek(0)
+                while True:
+                    b = f.read(cluster_size)
+                    size_bytes += len(b)
+                    if len(b) == 0:
+                        break
+                    if len(clusters) == 0:
+                        clusters.append(
+                            self._write_content_and_get_first_cluster(b))
+                    else:
+                        clusters.append(
+                            self.append_cluster_to_file(clusters[-1], b))
+            first_cluster = clusters[0] if len(clusters) > 0 else 0
+        return first_cluster, size_bytes
+
+    def append_cluster_to_file(self, last_cluster_number, cluster):
+        """
+        Appends cluster-sized content to cluster chain and returns number
+        of the cluster appended to chain
+        """
+        cluster_size = self.get_cluster_size()
+        if len(cluster) > cluster_size:
+            raise ValueError('"cluster" is too big!')
+        elif len(cluster) < cluster_size:
+            cluster = cluster + b'\x00' * (cluster_size - len(cluster))
+
+        cluster_num = self._write_content_and_get_first_cluster(cluster)
+        self._write_fat_value(last_cluster_number, cluster_num)
+        self._write_eof_fat_value(cluster_num)
+        return cluster_num
 
     def _write_content_and_get_first_cluster(self, content):
         """
-        Записывает данные и возвращает номер первого кластера
+        Writes content and returns number of first cluster
         """
         if len(content) == 0:
             return -1
-        cluster_size = self.sectors_per_cluster * self.bytes_per_sector
+        cluster_size = self.get_cluster_size()
         clusters_required = math.ceil(len(content) / cluster_size)
         clusters = self._find_free_clusters(clusters_required)
         prev_cluster = -1
@@ -395,19 +504,39 @@ class Fat32Editor:
                 self._write_fat_value(prev_cluster, cluster_num)
             content_end = content_start + cluster_size
 
-            cluster_start, _ = self._get_cluster_start_end(cluster_num)
-
+            cluster_start, _ = self._get_cluster_start_end_relative_to_data_start(
+                cluster_num)
+            cluster_start += self._data_area_start
+            _ += self._data_area_start
+            debug("Writing from {:d} to {:d} (cluster {:d}):".format(
+                cluster_start, _, cluster_num))
+            writing_content = content[content_start:content_end]
+            debug(BytesParser(writing_content)
+                  .hex_readable(0, cluster_size))
             self._fat_image_file.seek(cluster_start)
-            self._fat_image_file.write(content[content_start:content_end])
+            self._fat_image_file.write(writing_content)
+            self._fat_image_file.flush()
+            if DEBUG_MODE:
+                if self._get_data(cluster_num)[
+                   :len(writing_content)] != \
+                        writing_content:
+                    raise Exception("Content written somewhere else!")
 
             prev_cluster = cluster_num
 
         self._write_eof_fat_value(clusters[-1])
         return clusters[0]
 
+    def get_cluster_size(self):
+        return self.sectors_per_cluster * self.bytes_per_sector
+
     def _append_content_to_dir(self, directory, entries):
-        pass
-        # entries_required
+        for entry, start in zip(entries,
+                                self._find_dir_empty_entries(directory,
+                                                             len(entries))):
+            self._fat_image_file.seek(start)
+            self._fat_image_file.write(entry)
+            self._fat_image_file.flush()
 
     def _get_cluster_chain(self, first_cluster):
         cluster_chain = [first_cluster]
@@ -430,22 +559,28 @@ class Fat32Editor:
 
         data_start = self._data_area_start
         for cluster_num in clusters:
-            start, end = self._get_cluster_start_end(cluster_num)
+            start, end = self._get_cluster_start_end_relative_to_data_start(
+                cluster_num)
             for entry_start in range(data_start + start, data_start + end,
                                      BYTES_PER_DIR_ENTRY):
                 entry_bytes = fat_parser.get_bytes(entry_start, 1)
+                if DEBUG_MODE:
+                    print("CLuster " + str(cluster_num) +
+                          ": Looking for empty entry in " +
+                          fat_parser.hex_readable(entry_start,
+                                                  BYTES_PER_DIR_ENTRY))
                 if entry_bytes[0] == 0x00 or entry_bytes[0] == 0xE5:
                     entries_start.append(entry_start)
+                    debug("Found!")
                     if len(entries_start) == amount_required:
                         return entries_start
                 else:
                     entries_start.clear()
 
-        cluster_size = self.sectors_per_cluster * self.bytes_per_sector
-
+        debug("Directory too small, extending...")
         entries_required = amount_required - len(entries_start)
         clusters_required = math.ceil(
-            entries_required * BYTES_PER_DIR_ENTRY / cluster_size
+            entries_required * BYTES_PER_DIR_ENTRY / self.get_cluster_size()
         )
         clusters = self._get_cluster_chain(
             self._append_clusters_to_chain(
@@ -454,7 +589,8 @@ class Fat32Editor:
             )
         )
         for cluster_num in clusters:
-            start, end = self._get_cluster_start_end(cluster_num)
+            start, end = self._get_cluster_start_end_relative_to_data_start(
+                cluster_num)
             for entry_start in range(data_start + start, data_start + end,
                                      BYTES_PER_DIR_ENTRY):
                 entries_start.append(entry_start)
@@ -468,11 +604,30 @@ class Fat32Editor:
         Дополняет цепочку кластеров на clusters_required и возвращает первый
         из номеров добавленных кластеров.
         """
-        cluster_size = self.sectors_per_cluster * self.bytes_per_sector
+        if clusters_required <= 0:
+            return last_cluster
+
+        cluster_size = self.get_cluster_size()
 
         first_appended_cluster = self._write_content_and_get_first_cluster(
-            clusters_required * bytes(cluster_size)
+            bytes(cluster_size)
         )
         self._write_fat_value(last_cluster, first_appended_cluster)
 
+        prev_cluster = first_appended_cluster
+        for i in range(1, clusters_required):
+            next_cluster = \
+                self._write_content_and_get_first_cluster(bytes(cluster_size))
+            self._write_fat_value(prev_cluster, next_cluster)
+            prev_cluster = next_cluster
+
+        self._write_eof_fat_value(prev_cluster)
+
         return first_appended_cluster
+
+    def _update_first_free_cluster(self):
+        fs_info_start = self._sectors_to_bytes(self._fs_info_sector)
+        self._fat_image_file.seek(fs_info_start + 0x1e8)
+        self._fat_image_file.write(
+            int.to_bytes(self._first_free_cluster, length=4,
+                         byteorder='little'))

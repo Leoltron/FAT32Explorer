@@ -2,6 +2,8 @@
 
 from datetime import datetime, date, time
 
+import os
+
 DEBUG_MODE = False
 
 
@@ -67,7 +69,9 @@ class BytesParser:
                                            byteorder="little"))[2:].zfill(
             8 * length_bytes)
 
-    def hex_readable(self, start, length):
+    def hex_readable(self, start=0, length=None):
+        if length is None:
+            length = len(self)
         import binascii
         h = str(binascii.hexlify(self.get_bytes(start, length)))[
             2:-1].upper()
@@ -98,3 +102,45 @@ class FileBytesParser(BytesParser):
             return b''
 
         return self.get_bytes(start, length)
+
+    def __len__(self):
+        return os.fstat(self.file).st_size
+
+
+def int_to_bytes(length, value, byteorder="little"):
+    return int.to_bytes(value, length=length, byteorder=byteorder)
+
+
+def datetime_to_bytes(date_time):
+    date_bytes = date_to_bytes(date_time.date())
+    time_bytes = time_to_bytes(date_time.time())
+
+    return date_bytes + time_bytes
+
+
+def time_to_bytes(time):
+    return int_to_bytes(2, int(time_to_bits(time),
+                               base=2), "little")
+
+
+def date_to_bytes(date):
+    return int_to_bytes(2, int(date_to_bits(date),
+                               base=2), "little")
+
+
+def date_to_bits(date):
+    year_bin = bin(date.year - 1980)[2:].zfill(7)
+    month_bin = bin(date.month)[2:].zfill(4)
+    day_bin = bin(date.day)[2:].zfill(5)
+    result = year_bin + month_bin + day_bin
+    debug("date_to_bits: " + result)
+    return result
+
+
+def time_to_bits(time):
+    hour_bin = bin(time.hour)[2:].zfill(5)
+    minute_bin = bin(time.minute)[2:].zfill(6)
+    seconds_bin = bin(time.second // 2)[2:].zfill(5)
+    result = hour_bin + minute_bin + seconds_bin
+    debug("time_to_bits: " + result)
+    return result
