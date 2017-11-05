@@ -126,7 +126,8 @@ class File:
             attributes_list.append("directory")
         if self.is_archive:
             attributes_list.append("archive")
-        return ", ".join(attributes_list)
+        return ", ".join(attributes_list) if len(attributes_list) > 0 else \
+            "no attributes"
 
     @property
     def size_bytes(self):
@@ -176,8 +177,9 @@ class File:
     def to_directory_entries(self):
         entries = list()
 
-        if requires_lfn(self.name):
-            entries += to_lfn_parts(self.name)
+        if requires_lfn(self.name, self.parent):
+            entries += to_lfn_parts(self.name,
+                                    get_short_name_checksum(self.short_name))
 
         file_info_entry = bytearray(32)
         file_info_entry[11] = self.attributes
@@ -207,14 +209,19 @@ class File:
     def _write_short_name(self, file_info_entry):
         splitted_short_name = self.short_name.rsplit(".", 1)
         name_part = splitted_short_name[0][:8]
-        name_part += (8 - len(name_part)) * " "
         extension_part = "" if len(splitted_short_name) == 1 else \
             splitted_short_name[1][:3]
-        extension_part += (3 - len(extension_part)) * " "
+
         name_part_bytes = name_part.encode(encoding="cp866", errors="strict")
+        name_part_bytes += b'\x20' * (8 - len(name_part_bytes))
+
         extension_part = extension_part.encode(encoding="cp866",
                                                errors="strict")
+        extension_part += b'\x20' * (3 - len(extension_part))
+
         file_info_entry[0:8] = list(name_part_bytes)
+        if file_info_entry[0] == 0xE5:
+            file_info_entry[0] = 0x05
         file_info_entry[8:11] = list(extension_part)
 
     def _write_start_cluster_number(self, file_info_entry):
@@ -223,57 +230,73 @@ class File:
         file_info_entry[20:22] = start_custer_number_bytes[1::-1]
         file_info_entry[26:28] = start_custer_number_bytes[4:1:-1]
 
+    def contains_file_with_short_name(self, short_name):
+        if self.is_directory:
+            for file in self.content:
+                if file.short_name == short_name:
+                    return True
+            return False
+        else:
+            raise NotADirectoryError
+
 
 def eq_debug(one, other):
     print(str(one) + (" == " if one == other else" != ") + str(other))
 
 
-def get_file_from_external(external_name) -> File:
-    external_path = Path(external_name)
-    if not external_path.exists():
-        raise FileNotFoundError('File "{}" not found.'.format(external_name))
-
-    name = external_name.replace("\\", "/").rsplit("/", maxsplit=1)[-1]
-
-    short_name_splitted = get_short_name(name)
-    short_name = short_name_splitted[0] + (("." + short_name_splitted[1])
-                                           if short_name_splitted[1] else "")
-
-    file = File(short_name=short_name, long_name=name)
-
-    if external_path.is_dir():
-        size = 0
-        file.attributes = DIRECTORY
-        file.content = list()
-        for name in os.listdir(str(external_path.resolve())):
-            dir_file = get_file_from_external(
-                external_name.replace("\\", "/") + "/" + name)
-            file.content.append(dir_file)
-            size += dir_file.size_bytes
-        file._size_bytes = size
-    else:
-        file.external_name = external_name
-
-    return file
+def get_short_name_checksum(short_name):
+    return get_short_name_and_ext_checksum(*short_name.rsplit(".", maxsplit=1))
 
 
-def get_short_name(name):
+def fill_right(bytes_, width, fill_with=b'\x00'):
+    if len(fill_with) != 1:
+        raise ValueError(
+            "Length of the fill_with must be 1 byte, got " + str(fill_with))
+    if len(bytes_) >= width:
+        return bytes_
+    return bytes_ + (fill_with * (width - len(bytes_)))
+
+
+def get_short_name_and_ext_checksum(name, extension=""):
+    checksum = 0
+    s = name.encode(encoding='cp866') + \
+        (b"\x20" * (8 - len(name))) + \
+        extension.encode(encoding='cp866') + \
+        (b"\x20" * (3 - len(extension)))
+    for char_code in s:
+        carry = checksum & 1
+        checksum = checksum >> 1
+        if carry:
+            checksum += 0b10000000
+        checksum += char_code
+        checksum = checksum & 0xff
+    return checksum
+
+
+def get_short_name(name, directory: File = None):
     splitted_name = name.rsplit('.', maxsplit=1)
     name = splitted_name[0]
     extension = "" if len(splitted_name) == 1 else splitted_name[1]
 
     name = name.replace(".", "")
-    name = re.sub(r"[^a-zA-Z]", "_", name)
-    if len(name) > 8:
+    name = re.sub(r"[^a-zA-Z]", "_", name).upper()
+    extension = extension[:3].upper()
+
+    if len(name) > 8 or (directory is not None and directory
+            .contains_file_with_short_name(name + '.' + extension)):
+        i = 1
         name = name[:6] + "~1"
+        while directory is not None and \
+                directory.contains_file_with_short_name(
+                                    name + '.' + extension) and i < 9:
+            i += 1
+            name = name[:7] + str(i)
 
-    extension = extension[:3]
-
-    return name.upper(), extension.upper()
+    return name + '.' + extension
 
 
-def to_lfn_parts(name):
-    name_bytes = name.encode("utf_16")
+def to_lfn_parts(name, checksum=0):
+    name_bytes = name.encode("utf-16")
     parts = list()
     i = 0
     part_number = 0
@@ -284,11 +307,16 @@ def to_lfn_parts(name):
                 part[pos] = name_bytes[i]
                 part[pos + 1] = name_bytes[i + 1]
                 i += 2
+            elif i == len(name_bytes):
+                part[pos:pos + 1] = b'\x00\x00'
+                i += 2
             else:
-                break
+                part[pos:pos + 1] = b'\xff\xff'
+                i += 2
 
-        part[0] = part_number if i < len(name) else 0x42
+        part[0] = part_number if i < len(name) else 0x40 + part_number
         part[0x0b] = LFN
+        part[0x0d] = checksum
         parts.append(bytes(part))
         part_number += 1
     return parts[::-1]
@@ -299,8 +327,8 @@ def get_utf16_char_pos():
                            range(28, 32, 2))
 
 
-def requires_lfn(name):
-    short_name_splitted = get_short_name(name)
+def requires_lfn(name, directory=None):
+    short_name_splitted = get_short_name(name, directory)
     short_name = short_name_splitted[0] + (("." + short_name_splitted[1])
                                            if short_name_splitted[1] else "")
     return name != short_name

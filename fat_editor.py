@@ -54,7 +54,7 @@ def get_lfn_part(entry_bytes):
             lfn_part += char.decode("utf_16")
         else:
             break
-    return lfn_part
+    return lfn_part, entry_bytes[0x0D]
 
 
 def parse_file_info(entry_parser, long_file_name_buffer=""):
@@ -126,7 +126,7 @@ class Fat32Editor:
         self._fat_image_file = fat_image_file
         self._read_fat32_boot_sector()
         self._read_and_validate_fs_info()
-        # self._validate_fat()
+        self._validate_fat()
         self._parse_data_area()
 
     def _parse_data_area(self):
@@ -140,13 +140,10 @@ class Fat32Editor:
 
         self.sectors_per_fat = bytes_parser.parse_int_unsigned(0x24, 4)
         self.active_fat_number = bytes_parser.parse_int_unsigned(0x28, 2)
-
         self.root_catalog_first_cluster = bytes_parser.parse_int_unsigned(0x2c,
                                                                           4)
         self._fs_info_sector = bytes_parser.parse_int_unsigned(0x30, 2)
-
         self._parse_boot_sector(bytes_parser)
-
         self.boot_sector_copy_sector = bytes_parser.parse_int_unsigned(0x32, 2)
 
     def _parse_boot_sector(self, bytes_parser):
@@ -219,9 +216,11 @@ class Fat32Editor:
     def _parse_dir_files(self, data, directory):
         files = list()
         long_file_name_buffer = ""
+        lfn_checksum_buffer = -1
         for start in range(0, len(data) - BYTES_PER_DIR_ENTRY,
                            BYTES_PER_DIR_ENTRY):
-            debug("long_file_name_buffer = \"" + long_file_name_buffer + "\"")
+            debug('long_file_name_buffer = "' + long_file_name_buffer + '"')
+            debug('lfn_checksum_buffer = ' + str(lfn_checksum_buffer))
             entry_bytes = data[start:start + BYTES_PER_DIR_ENTRY]
             if entry_bytes[0] == 0x00:
                 # directory has no more entries
@@ -236,24 +235,36 @@ class Fat32Editor:
             attributes = entry_parser.parse_int_unsigned(11, 1)
 
             if attributes == fs_objects.LFN:  # Long file name entry
-                long_file_name_buffer = get_lfn_part(entry_bytes) + \
+                lfn_part, lfn_checksum = get_lfn_part(entry_bytes)
+                long_file_name_buffer = lfn_part + \
                                         long_file_name_buffer
+                if 0 <= lfn_checksum_buffer != lfn_checksum:
+                    debug("Warning: checksum changed from {:d} to"
+                          " {:d} during lfn sequence"
+                          .format(lfn_checksum_buffer, lfn_checksum))
+                lfn_checksum_buffer = lfn_checksum
+
             elif attributes & fs_objects.VOLUME_ID:
                 # TODO: Чтение Volume ID
                 pass
             else:
                 try:
                     file = self._parse_file_entry(entry_parser,
-                                                  long_file_name_buffer)
+                                                  long_file_name_buffer,
+                                                  lfn_checksum_buffer)
                 except ValueError:
+                    debug('Entry is "dot" entry, ignoring...')
                     continue
                 file.parent = directory
                 files.append(file)
                 long_file_name_buffer = ""
+                lfn_checksum_buffer = -1
                 debug(file.get_attributes_str())
         return files
 
-    def _parse_file_entry(self, entry_parser, long_file_name_buffer):
+    def _parse_file_entry(self, entry_parser,
+                          long_file_name_buffer,
+                          lfn_checksum):
         debug("parse_file_entry: ")
         debug("\thex: " + entry_parser.hex_readable(0, BYTES_PER_DIR_ENTRY))
 
@@ -267,11 +278,20 @@ class Fat32Editor:
                               file.short_name == "." else
                               "parent directory."))
 
+        if long_file_name_buffer:
+            checksum = fs_objects.get_short_name_checksum(file.short_name)
+            if checksum != lfn_checksum:
+                debug("Warning: file short name checksum {:d} is not equal to "
+                      "LFN checksum {:d}".format(checksum, lfn_checksum))
+            else:
+                debug("File short name checksum {:d} is equal to "
+                      "LFN checksum {:d}".format(checksum, lfn_checksum))
+
         name = "directory" if file.is_directory else "file"
-        debug("Parsing content for " + name + " \"" + file.name + "\" ...")
+        debug("Parsing content for " + name + ' "' + file.name + '" ...')
         file.content = self._parse_file_content(entry_parser, file)
         debug(
-            "Parsing content for " + name + " \"" + file.name + "\" completed")
+            "Parsing content for " + name + ' "' + file.name + '" completed')
 
         return file
 
@@ -333,8 +353,8 @@ class Fat32Editor:
             fat = self._get_fat(i)
             if prev_fat is not None and prev_fat != fat:
                 raise ValueError(
-                    "File allocation tables №{0} and №{1} are not equal!"
-                        .format(str(i), str(i - 1)))
+                    "File allocation tables #{:d} and #{:d} are not equal!"
+                        .format(i, i - 1))
             prev_fat = fat
 
     def get_fat_value(self, cluster):
@@ -359,13 +379,16 @@ class Fat32Editor:
 
     def _write_fat_bytes(self, cluster, bytes_):
         for i in range(self.fat_amount):
+            debug("Writing value {} ({:d}) to FAT #{:d}".format(
+                BytesParser(bytes_).hex_readable(),
+                int.from_bytes(bytes_, byteorder='little'),
+                i)
+            )
             fat_start, _ = self._get_fat_start_end_sectors(i)
 
-            value_start = fat_start * self.bytes_per_sector + \
+            value_start = self._sectors_to_bytes(fat_start) + \
                           cluster * BYTES_PER_FAT32_ENTRY
-            self._fat_image_file.seek(value_start)
-            self._fat_image_file.write(bytes_)
-            self._fat_image_file.flush()
+            self._write_content_to_image(value_start, bytes_)
 
     def _find_free_clusters(self, clusters_amount):
         required = clusters_amount
@@ -385,6 +408,7 @@ class Fat32Editor:
             if clusters_amount == 0:
                 self._first_free_cluster = i // BYTES_PER_FAT32_ENTRY
                 self._update_first_free_cluster()
+                self._decrease_free_clusters_amount_by(required)
                 break
             value = fat_parser.get_bytes(i, BYTES_PER_FAT32_ENTRY)
             debug("Looking to cluster #" + str(
@@ -414,7 +438,8 @@ class Fat32Editor:
             directory = find_directory(root, internal_path)
 
         name = ("/" + str(path).replace("\\", "/")).split("/")[-1]
-        short_name = '.'.join(fs_objects.get_short_name(name))
+        short_name = '.'.join(fs_objects.
+                              get_short_name(name, directory=directory))
         attributes = fs_objects.DIRECTORY if path.is_dir() else 0
 
         creation_datetime, last_access_date, modification_datetime = \
@@ -451,11 +476,12 @@ class Fat32Editor:
             file.content = list()
             first_cluster = file._start_cluster = \
                 self._write_content_and_get_first_cluster(bytes(cluster_size))
+
             for name in os.listdir(external_path):
                 path = os.path.join(external_path.absolute(), name)
                 file.content.append(self.write_to_image(path, "", file))
         else:
-            with open(external_path, 'rb') as f:
+            with open(str(external_path.absolute()), 'rb') as f:
                 f.seek(0)
                 while True:
                     b = f.read(cluster_size)
@@ -513,9 +539,7 @@ class Fat32Editor:
             writing_content = content[content_start:content_end]
             debug(BytesParser(writing_content)
                   .hex_readable(0, cluster_size))
-            self._fat_image_file.seek(cluster_start)
-            self._fat_image_file.write(writing_content)
-            self._fat_image_file.flush()
+            self._write_content_to_image(cluster_start, writing_content)
             if DEBUG_MODE:
                 if self._get_data(cluster_num)[
                    :len(writing_content)] != \
@@ -527,6 +551,11 @@ class Fat32Editor:
         self._write_eof_fat_value(clusters[-1])
         return clusters[0]
 
+    def _write_content_to_image(self, start, content):
+        self._fat_image_file.seek(start)
+        self._fat_image_file.write(content)
+        self._fat_image_file.flush()
+
     def get_cluster_size(self):
         return self.sectors_per_cluster * self.bytes_per_sector
 
@@ -534,9 +563,7 @@ class Fat32Editor:
         for entry, start in zip(entries,
                                 self._find_dir_empty_entries(directory,
                                                              len(entries))):
-            self._fat_image_file.seek(start)
-            self._fat_image_file.write(entry)
-            self._fat_image_file.flush()
+            self._write_content_to_image(start, entry)
 
     def _get_cluster_chain(self, first_cluster):
         cluster_chain = [first_cluster]
@@ -631,3 +658,15 @@ class Fat32Editor:
         self._fat_image_file.write(
             int.to_bytes(self._first_free_cluster, length=4,
                          byteorder='little'))
+
+    def _decrease_free_clusters_amount_by(self, amount):
+        if self._free_clusters > 0:
+            self._free_clusters -= amount
+            self._update_free_clusters_amount()
+
+    def _update_free_clusters_amount(self):
+        fs_info_start = self._sectors_to_bytes(self._fs_info_sector)
+        self._write_content_to_image(fs_info_start + 0x1e8,
+                                     int.to_bytes(self._free_clusters,
+                                                  length=4,
+                                                  byteorder='little'))

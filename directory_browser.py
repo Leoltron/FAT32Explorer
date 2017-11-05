@@ -298,7 +298,7 @@ class DirectoryBrowser:
             path = "temp" + file.get_absolute_path()
             save_file_at_external(file, path, self._fat_editor)
 
-            if sys.platform == 'linux2':
+            if sys.platform == 'linux':
                 subprocess.call(["xdg-open", path])
             else:
                 os.startfile(path.replace("/", "\\"))
@@ -355,9 +355,10 @@ class DirectoryBrowser:
         external_path, image_path = parse_file_args(args, 2)
 
         try:
-            file = self._fat_editor.write_to_image(external_path, image_path)
-            dir_ = find(image_path, source=self.current, priority='directory')
-            dir_.content.append(file)
+            current = self.current.get_absolute_path() if self.current != self.root else "."
+            self._fat_editor.write_to_image(external_path, image_path)
+            self.root = self.current = self._fat_editor.get_root_directory()
+            self.change_directory(current)
         except Exception as e:
             raise  # DirectoryBrowserError(str(e))
 
