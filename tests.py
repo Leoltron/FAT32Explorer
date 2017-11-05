@@ -2,10 +2,16 @@
 import datetime
 import unittest
 
+from pathlib import Path
+
+import os
+
 import directory_browser
 import fat_editor
 import fs_objects
 from bytes_parsers import BytesParser
+
+TEST_IMAGE_ARCHIVE_URL = "https://github.com/Leoltron/FAT32Explorer/raw/master/TEST-IMAGE.zip"
 
 ASCII = "ascii"
 UTF16 = "utf16"
@@ -72,7 +78,7 @@ class FileTests(unittest.TestCase):
 
     def test_attr_str_empty(self):
         file = fs_objects.File("file", "file")
-        self.assertEqual("", file.get_attributes_str())
+        self.assertEqual("no attributes", file.get_attributes_str())
 
 
 class BytesParserTests(unittest.TestCase):
@@ -171,30 +177,65 @@ class FatReaderStaticTests(unittest.TestCase):
         lfn_bytes = b'\x43\x38\x04\x38\x04\x2E\x00\x74\x00\x78\x00' \
                     b'\x0F\x00\x31\x74\x00\x00\x00\xFF\xFF\xFF\xFF' \
                     b'\xFF\xFF\xFF\xFF\x00\x00\xFF\xFF\xFF\xFF'
-        self.assertEqual(fat_editor.get_lfn_part(lfn_bytes),
+        self.assertEqual(fat_editor.get_lfn_part(lfn_bytes)[0],
                          "ии.txt")
 
 
+TEST_IMAGE_NAME = "TEST-IMAGE"
+TESTS_RES_DIR_NAME = "tests_tmp_resources"
+
+
+def ensure_dir(file_path):
+    directory = os.path.dirname(file_path)
+    if not os.path.exists(directory):
+        os.makedirs(directory)
+
+
 class FatReaderTests(unittest.TestCase):
+    def setUp(self):
+        self.test_image_path = path_str = TESTS_RES_DIR_NAME + "/" + TEST_IMAGE_NAME
+        ensure_dir(path_str)
+        zip_path_str = TESTS_RES_DIR_NAME + "/" + TEST_IMAGE_NAME + ".zip"
+
+        if os.path.exists(path_str):
+            os.remove(path_str)
+        if os.path.exists(zip_path_str):
+            os.remove(zip_path_str)
+
+        print("Downloading TEST-IMAGE.zip...")
+        from urllib import request
+        request.urlretrieve(TEST_IMAGE_ARCHIVE_URL, zip_path_str)
+        print("Download complete.")
+
+        print("Extracting test images...")
+        import zipfile
+        with zipfile.ZipFile("TEST-IMAGE.zip", "r") as zip_ref:
+            zip_ref.extractall(TESTS_RES_DIR_NAME)
+        print("done")
+
     # noinspection SpellCheckingInspection
     def test_image(self):
-        with open("TEST-IMAGE", "rb") as fi:
+        with open(self.test_image_path, "rb") as fi:
             f = fat_editor.Fat32Editor(fi)
             names = f.get_root_directory().get_dir_hierarchy()
             self.assertEqual(names,
-                         {
-                             "System Volume Information": {
-                                 "WPSettings.dat": {},
-                                 "IndexerVolumeGuid": {}},
-                             "Folder1": {"Astaf.txt": {}, "SHORT.TXT": {}},
-                             "Файл.txt": {},
-                             "FileQWERTYUIOPASDFGHJKLZXCVBNMAZQWSXEDCRF"
-                             "VTGBYHNUJMIKZAWSXEDCRGBY"
-                             "HUJNMZQAWSXEDCRTGBYHNUJMIK.txt": {},
-                             "VXlZSvgG0z0.jpg": {},
-                             "Файл с кириллицей в названии.txt": {},
-                             "$RECYCLE": {"DESKTOP.INI": {}}, }
-                         )
+                             {
+                                 "System Volume Information": {
+                                     "WPSettings.dat": {},
+                                     "IndexerVolumeGuid": {}},
+                                 "Folder1": {"Astaf.txt": {}, "SHORT.TXT": {}},
+                                 "Файл.txt": {},
+                                 "FileQWERTYUIOPASDFGHJKLZXCVBNMAZQWSXEDCRF"
+                                 "VTGBYHNUJMIKZAWSXEDCRGBY"
+                                 "HUJNMZQAWSXEDCRTGBYHNUJMIK.txt": {},
+                                 "VXlZSvgG0z0.jpg": {},
+                                 "Файл с кириллицей в названии.txt": {},
+                                 "$RECYCLE": {"DESKTOP.INI": {}}, }
+                             )
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(TESTS_RES_DIR_NAME)
 
 
 class DirectoryBrowserTests(unittest.TestCase):
@@ -274,8 +315,9 @@ class WriterTests(unittest.TestCase):
         parts = fs_objects.to_lfn_parts(name)
         actual = ""
         for part in parts:
-            actual = fat_editor.get_lfn_part(part) + actual
+            actual = fat_editor.get_lfn_part(part)[0] + actual
         self.assertEqual(actual, name)
+
 
 if __name__ == '__main__':
     unittest.main()
