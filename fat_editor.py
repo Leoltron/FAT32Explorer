@@ -12,7 +12,7 @@ import fs_objects
 BYTES_PER_DIR_ENTRY = 32
 BYTES_PER_FAT32_ENTRY = 4
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 
 def debug(message):
@@ -121,13 +121,31 @@ def get_time_stamps(external_path):
     return creation_datetime, last_access_date, modification_datetime
 
 
-class Fat32Editor:
-    def __init__(self, fat_image_file):
+def print_no_new_line(s, **kwargs):
+    print(s, end='', flush=True, **kwargs)
+
+
+class Fat32Reader:
+    _log_clusters_usage = False
+    _log_clusters_usage_adv = False
+    _repair_file_size_mode = False
+    used_clusters = dict()
+    errors_found = 0
+    errors_repaired = 0
+
+    def __init__(self, fat_image_file, print_scan_info=False):
+        self.valid = True
+
+        self._print_scan_info = print_scan_info
         self._fat_image_file = fat_image_file
         self._read_fat32_boot_sector()
         self._read_and_validate_fs_info()
-        self._validate_fat()
+        self._validate_fat(do_raise=not print_scan_info)
         self._parse_data_area()
+
+    def scan_info(self, s):
+        if self._print_scan_info:
+            print(s)
 
     def _parse_data_area(self):
         self._data_area_start = self._sectors_to_bytes(self.reserved_sectors
@@ -146,6 +164,28 @@ class Fat32Editor:
         self._parse_boot_sector(bytes_parser)
         self.boot_sector_copy_sector = bytes_parser.parse_int_unsigned(0x32, 2)
 
+    def _read_and_validate_fs_info(self):
+        fs_info_bytes = self._sector_slice(self._fs_info_sector)
+        try:
+            validate_fs_info(fs_info_bytes)
+        except ValueError:
+            if self._print_scan_info:
+                print(
+                    "Incorrect format of FS Info sector, FAT32 validation failed.")
+                self.valid = False
+            else:
+                raise
+
+        parser = BytesParser(fs_info_bytes)
+        self._free_clusters = \
+            parser.parse_int_unsigned(0x1e8, 4, byteorder='little')
+        if self._free_clusters == 0xFFFFFFFF:
+            self._free_clusters = -1
+        self._first_free_cluster = \
+            parser.parse_int_unsigned(0x1ec, 4, byteorder='little')
+        if self._first_free_cluster == 0xFFFFFFFF:
+            self._first_free_cluster = -1
+
     def _parse_boot_sector(self, bytes_parser):
         self.bytes_per_sector = bytes_parser.parse_int_unsigned(0x0b, 2)
         self.sectors_per_cluster = bytes_parser.parse_int_unsigned(0x0d, 1)
@@ -158,20 +198,6 @@ class Fat32Editor:
 
         if self.total_sectors == 0:
             self.total_sectors = bytes_parser.parse_int_unsigned(0x20, 4)
-
-    def _read_and_validate_fs_info(self):
-        fs_info_bytes = self._sector_slice(self._fs_info_sector)
-        validate_fs_info(fs_info_bytes)
-
-        parser = BytesParser(fs_info_bytes)
-        self._free_clusters = \
-            parser.parse_int_unsigned(0x1e8, 4, byteorder='little')
-        if self._free_clusters == 0xFFFFFFFF:
-            self._free_clusters = -1
-        self._first_free_cluster = \
-            parser.parse_int_unsigned(0x1ec, 4, byteorder='little')
-        if self._first_free_cluster == 0xFFFFFFFF:
-            self._first_free_cluster = -1
 
     def _sectors_to_bytes(self, sectors):
         return self.bytes_per_sector * sectors
@@ -193,6 +219,11 @@ class Fat32Editor:
             end_cluster * self.sectors_per_cluster
         )
 
+    def _get_fat_start_end_sectors(self, fat_number):
+        start = self.reserved_sectors + fat_number * self.sectors_per_fat
+        end = start + self.sectors_per_fat
+        return start, end
+
     def _get_active_fat_start_end_sectors(self):
         return self._get_fat_start_end_sectors(self.active_fat_number)
 
@@ -200,12 +231,11 @@ class Fat32Editor:
         start, end = self._get_fat_start_end_sectors(fat_number)
         return self._sector_slice(start, end)
 
-    def _get_fat_start_end_sectors(self, fat_number):
-        start = self.reserved_sectors + fat_number * self.sectors_per_fat
-        end = start + self.sectors_per_fat
-        return start, end
-
     def get_root_directory(self):
+        if self._log_clusters_usage or self._log_clusters_usage_adv:
+            for cluster in self._get_cluster_chain(
+                    self.root_catalog_first_cluster):
+                self.used_clusters[cluster] = True
         root = fs_objects.File("", "", fs_objects.DIRECTORY, None, None, None,
                                0, self.root_catalog_first_cluster)
         root.content = self._parse_dir_files(
@@ -252,9 +282,36 @@ class Fat32Editor:
                     file = self._parse_file_entry(entry_parser,
                                                   long_file_name_buffer,
                                                   lfn_checksum_buffer)
+                    requires_size_check = self._repair_file_size_mode and \
+                                          not file.is_directory
+                    requires_cluster_usage_logging = \
+                        self._log_clusters_usage \
+                        or self._log_clusters_usage_adv
+                    if requires_cluster_usage_logging or \
+                            requires_size_check:
+                        cluster_size = self.get_cluster_size()
+                        cluster_seq_num = start // cluster_size
+                        entry_start_in_cluster = start % cluster_size
+                        chain = self._get_cluster_chain(
+                            directory._start_cluster)
+                        cluster_num = \
+                            chain[
+                                cluster_seq_num]
+                        start_sector, _ = \
+                            self._get_cluster_start_end_relative_to_data_start(
+                                cluster_num)
+                        entry_start = self._sectors_to_bytes(
+                            start_sector) + entry_start_in_cluster
+                    if requires_cluster_usage_logging:
+                        self._log_file_clusters_usage(file=file,
+                                                      entry_start=entry_start)
                 except ValueError:
                     debug('Entry is "dot" entry, ignoring...')
                     continue
+
+                if requires_size_check:
+                    self._repair_file_size(file, entry_start)
+
                 file.parent = directory
                 files.append(file)
                 long_file_name_buffer = ""
@@ -342,19 +399,23 @@ class Fat32Editor:
 
     def _get_next_file_cluster(self, prev_cluster):
         table_value = self.get_fat_value(prev_cluster)
-        if table_value < 0x0FFFFFF7:
+        if table_value < 0x0FFFFFF7 and table_value != 1:
             return table_value
         else:
             raise EOFError
 
-    def _validate_fat(self):
+    def _validate_fat(self, do_raise=True):
         prev_fat = None
         for i in range(self.fat_amount):
             fat = self._get_fat(i)
             if prev_fat is not None and prev_fat != fat:
-                raise ValueError(
-                    "File allocation tables #{:d} and #{:d} are not equal!"
-                        .format(i, i - 1))
+                error_message = "File allocation tables #{:d} " \
+                                "and #{:d} are not equal!".format(i, i - 1)
+                self.valid = False
+                if do_raise:
+                    raise ValueError(error_message)
+                else:
+                    self.scan_info(error_message)
             prev_fat = fat
 
     def get_fat_value(self, cluster):
@@ -366,6 +427,36 @@ class Fat32Editor:
         return format_fat_address(
             fat_parser.parse_int_unsigned(value_start, BYTES_PER_FAT32_ENTRY))
 
+    def get_cluster_size(self):
+        return self.sectors_per_cluster * self.bytes_per_sector
+
+    def _get_cluster_chain(self, first_cluster):
+        cluster_chain = [first_cluster]
+        current_cluster = first_cluster
+        while True:
+            try:
+                current_cluster = self._get_next_file_cluster(current_cluster)
+                cluster_chain.append(current_cluster)
+            except EOFError:
+                break
+        return cluster_chain
+
+    def _repair_file_size(self, file, start):
+        pass
+
+    def _log_file_clusters_usage(self, file, entry_start):
+        pass
+
+
+def is_cluster_reserved(cluster_fat_value):
+    return 0xFFFFFF0 >= cluster_fat_value >= 0xFFFFFF6
+
+
+def is_cluster_bad(cluster_fat_value):
+    return cluster_fat_value == 0xFFFFFF7
+
+
+class Fat32Editor(Fat32Reader):
     def _write_fat_value(self, cluster, value):
         self._write_fat_bytes(cluster,
                               int.to_bytes(
@@ -509,7 +600,8 @@ class Fat32Editor:
             cluster = cluster + b'\x00' * (cluster_size - len(cluster))
 
         cluster_num = self._write_content_and_get_first_cluster(cluster)
-        self._write_fat_value(last_cluster_number, cluster_num)
+        if last_cluster_number >= 0:
+            self._write_fat_value(last_cluster_number, cluster_num)
         self._write_eof_fat_value(cluster_num)
         return cluster_num
 
@@ -556,25 +648,11 @@ class Fat32Editor:
         self._fat_image_file.write(content)
         self._fat_image_file.flush()
 
-    def get_cluster_size(self):
-        return self.sectors_per_cluster * self.bytes_per_sector
-
     def _append_content_to_dir(self, directory, entries):
         for entry, start in zip(entries,
                                 self._find_dir_empty_entries(directory,
                                                              len(entries))):
             self._write_content_to_image(start, entry)
-
-    def _get_cluster_chain(self, first_cluster):
-        cluster_chain = [first_cluster]
-        current_cluster = first_cluster
-        while True:
-            try:
-                current_cluster = self._get_next_file_cluster(current_cluster)
-                cluster_chain.append(current_cluster)
-            except EOFError:
-                break
-        return cluster_chain
 
     def _find_dir_empty_entries(self, directory, amount_required):
         if amount_required <= 0:
@@ -670,3 +748,147 @@ class Fat32Editor:
                                      int.to_bytes(self._free_clusters,
                                                   length=4,
                                                   byteorder='little'))
+
+    def scandisk(self, find_lost_sectors, find_intersecting_chains,
+                 check_files_size):
+        if not self.valid:
+            print("Critical error, cannot continue")
+            return
+        self._log_clusters_usage = find_lost_sectors
+        self._log_clusters_usage_adv = find_intersecting_chains
+        self._repair_file_size_mode = check_files_size
+        self.errors_found = 0
+        self.errors_repaired = 0
+        self.get_root_directory()
+        if self._log_clusters_usage:
+            self.scan_for_lost_clusters()
+        print("Errors found: {:d}, errors repaired: {:d}"
+              .format(self.errors_found, self.errors_repaired))
+
+    def _repair_file_size(self, file, entry_start):
+        print('Checking "' + file.get_absolute_path() + '" file size...')
+        print_no_new_line("File size by entry: " + str(file.get_size_str()))
+        file_clusters_amount = len(
+            self._get_cluster_chain(file._start_cluster))
+        bytes_per_cluster = self.sectors_per_cluster * self.bytes_per_sector
+        max_size_bytes = file_clusters_amount * bytes_per_cluster
+        print_no_new_line(", max size: " +
+                          str(fs_objects.get_size_str(max_size_bytes)))
+        if file.size_bytes > max_size_bytes:
+            self.errors_found += 1
+            print_no_new_line(" - reducing file size in entry... ")
+            file.size_bytes = max_size_bytes
+            self._write_content_to_image(entry_start + 28, int.to_bytes(
+                max_size_bytes, length=4, byteorder='little'))
+            self.errors_repaired += 1
+            print("Done.")
+        else:
+            print(" - size is correct.")
+
+    def _log_file_clusters_usage(self, file, entry_start):
+        print('Checking "' + file.get_absolute_path() + '" clusters:')
+        clusters = self._get_cluster_chain(file._start_cluster)
+        for i in range(len(clusters)):
+            cluster = clusters[i]
+            print_no_new_line(
+                "Checking cluster #{:d} (of {:d}): {:d}".format(i + 1,
+                                                                len(clusters),
+                                                                cluster))
+            if cluster in self.used_clusters:
+                self.errors_found += 1
+                print(" - cluster (and the rest of the chain) "
+                      "already used, copying content to another cluster")
+                clusters_to_copy = clusters[i:]
+                prev_cluster = -1 if i == 0 else clusters[i - 1]
+                for cluster_to_copy in clusters_to_copy:
+                    data_to_copy = self._get_data(cluster_to_copy)
+                    if prev_cluster == -1:
+                        file._start_cluster = prev_cluster = \
+                            self._write_content_and_get_first_cluster(
+                                data_to_copy)
+                        start_custer_number_bytes = int.to_bytes(
+                            prev_cluster,
+                            length=4, byteorder='big')
+                        self._fat_image_file.seek(entry_start + 20)
+                        self._fat_image_file.write(
+                            start_custer_number_bytes[1::-1])
+                        self._fat_image_file.seek(entry_start + 26)
+                        self._fat_image_file.write(
+                            start_custer_number_bytes[4:1:-1])
+                        self._fat_image_file.flush()
+                    else:
+                        prev_cluster = self.append_cluster_to_file(
+                            prev_cluster, data_to_copy)
+                    self.used_clusters[prev_cluster] = True
+                self.errors_repaired += 1
+                break
+            else:
+                print(" - OK", end='\n' if i == len(clusters) - 1 else '\r',
+                      flush=True)
+                self.used_clusters[cluster] = True
+
+    def scan_for_lost_clusters(self):
+        print("Scanning for lost clusters")
+        total_clusters = self.sectors_per_fat * self.bytes_per_sector / BYTES_PER_FAT32_ENTRY
+
+        parser = FileBytesParser(self._fat_image_file)
+        fat_start, fat_end = self._get_active_fat_start_end_sectors()
+        fat_start *= self.bytes_per_sector
+        fat_end *= self.bytes_per_sector
+
+        free_clusters = 0
+        bad_clusters = 0
+        reserved_clusters = 2
+        used_clusters = 0
+
+        cluster_number = 2
+        progress = -1
+        for i in range(fat_start + 2 * BYTES_PER_FAT32_ENTRY, fat_end,
+                       BYTES_PER_FAT32_ENTRY):
+            new_progress = cluster_number * 100 // total_clusters
+            if new_progress != progress:
+                progress = new_progress
+                print_no_new_line("Progress: {:.0f}%\r".format(progress))
+            fat_value = parser.parse_int_unsigned(i, BYTES_PER_FAT32_ENTRY)
+            fat_value = format_fat_address(fat_value)
+
+            is_free = fat_value == 0
+            is_bad = is_cluster_bad(fat_value)
+            is_reserved = is_cluster_reserved(fat_value)
+
+            if cluster_number not in self.used_clusters and not \
+                    (is_free or is_reserved or is_bad):
+                self.errors_found += 1
+                print_no_new_line(
+                    "Cluster #{:d} is not used by any file but not "
+                    "marked as free, repairing... ".format(cluster_number))
+                self._write_fat_value(cluster_number, 0)
+                print(" Done.")
+                self.errors_repaired += 1
+                free_clusters += 1
+            elif is_free:
+                free_clusters += 1
+            elif is_bad:
+                bad_clusters += 1
+            elif is_reserved:
+                reserved_clusters += 1
+            else:
+                used_clusters += 1
+            cluster_number += 1
+        total_clusters = free_clusters + bad_clusters + reserved_clusters + used_clusters
+
+        free_clusters_part = free_clusters / total_clusters * 100
+        used_clusters_part = used_clusters / total_clusters * 100
+        reserved_clusters_part = reserved_clusters / total_clusters * 100
+        bad_clusters_part = bad_clusters / total_clusters * 100
+
+        print("Cluster usage:")
+        print("\t Total clusters: {:d} (100%)".format(total_clusters))
+        print("\t Free clusters: {:d} ({:.2f}%)".format(free_clusters,
+                                                        free_clusters_part))
+        print("\t Used clusters: {:d} ({:.2f}%)".format(used_clusters,
+                                                        used_clusters_part))
+        print("\t Reserved clusters: {:d} ({:.2f}%)".format(reserved_clusters,
+                                                            reserved_clusters_part))
+        print("\t Bad clusters: {:d} ({:.2f}%)".format(bad_clusters,
+                                                       bad_clusters_part))

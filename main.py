@@ -18,16 +18,9 @@
 #    (с указанием места назначения) (Готово)
 # 5. Возможность копирования файлов и каталогов с хостовой машины в образ
 
-# (Файл)
-# Засунуть в DirectoryBrowser файл
-# Определить кол-во требуемых кластеров и их номера(из Fx INFO?)
-# Сгенерировать запись для директории и дополнить её (в т.ч. выделив доп. кластер)
-# Записать данные в FAT и  кластеры данных
-# Обновить FSINFO (?)
-
 # 6. Приложить тестовые образы:
-#   1. Автоматически скачивать (если получится)
-#   2. В readme указать ссылку, откуда скачивать
+#   1. Автоматически скачивать (если получится) (Готово)
+#   2. В readme указать ссылку, откуда скачивать (Не требуется)
 #   3. 2 образа: нормальный и с ошибками
 
 import sys
@@ -35,12 +28,37 @@ import fat_editor
 from directory_browser import DirectoryBrowser
 from pathlib import Path
 
+SCANDISK_ARGS = ["-l", "-i", "-z"]
+
 
 def main():
-    image_file_name = ' '.join(sys.argv[1:])
+    if '-h' in sys.argv:
+        print_usage()
+
+    scandisk = False
+    find_lost_sectors = False
+    find_intersecting_chains = False
+    check_files_size = False
+    if sys.argv[1] in ['-s'] + SCANDISK_ARGS:
+        scandisk = True
+        start = 2
+        while start < len(sys.argv):
+            if sys.argv[start] == '-l':
+                find_lost_sectors = True
+            elif sys.argv[start] == '-i':
+                find_intersecting_chains = True
+            elif sys.argv[start] == '-z':
+                check_files_size = True
+            else:
+                break
+            start += 1
+
+        image_file_name = ' '.join(sys.argv[start:])
+    else:
+        image_file_name = ' '.join(sys.argv[1:])
 
     if not image_file_name:
-        print("Usage: " + sys.argv[0] + " <file_name>")
+        print_usage()
         return
 
     image_file_path = Path(image_file_name)
@@ -51,8 +69,20 @@ def main():
 
     with open(image_file_name, "r+b") as fi:
         f = fat_editor.Fat32Editor(fi)
-        print("Image successfully parsed.")
-        DirectoryBrowser(fat_editor=f).start_interactive_mode()
+        if f.valid:
+            print("Image successfully parsed.")
+        if scandisk:
+            f.scandisk(
+                find_lost_sectors,
+                find_intersecting_chains,
+                check_files_size
+            )
+        else:
+            DirectoryBrowser(fat_editor=f).start_interactive_mode()
+
+
+def print_usage():
+    print("Usage: " + sys.argv[0] + " [-s] [-l] [-i] [-z] [-h] <file_name>")
 
 
 if __name__ == '__main__':

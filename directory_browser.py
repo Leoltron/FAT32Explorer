@@ -248,8 +248,8 @@ class DirectoryBrowser:
         if '/?' in flags:
             print_dir_help()
             return
-        recursive = '/s' in flags or '/S' in flags
-        names_only = '/b' in flags or '/B' in flags
+        recursive = '/s' in flags or '-s' in flags
+        names_only = '/b' in flags or '-b' in flags
         print('"' + self.current.get_absolute_path() + '" content:')
         print_dir_content(self.current, names_only, recursive)
 

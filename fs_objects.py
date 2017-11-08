@@ -26,6 +26,23 @@ LFN = READ_ONLY | HIDDEN | SYSTEM | VOLUME_ID
 DEBUG_MODE = False
 
 
+def get_size_str(size):
+    bytes_str = "{} {}".format(size,
+                               "byte" if size == 1 else "bytes")
+    if size < BYTES_PER_KIB:
+        return bytes_str
+    bytes_str = "(" + bytes_str + ")"
+    if size >= BYTES_PER_TIB:
+        short_str = "{:.2f} TiB ".format(size / BYTES_PER_TIB)
+    elif size >= BYTES_PER_GIB:
+        short_str = "{:.2f} GiB ".format(size / BYTES_PER_GIB)
+    elif size >= BYTES_PER_MIB:
+        short_str = "{:.2f} MiB ".format(size / BYTES_PER_MIB)
+    else:
+        short_str = "{:.2f} KiB ".format(size / BYTES_PER_KIB)
+    return short_str + bytes_str
+
+
 class File:
     content = None
     parent = None
@@ -140,23 +157,7 @@ class File:
     def get_size_str(self):
         size = self.size_bytes
 
-        bytes_str = "{} {}".format(size,
-                                   "byte" if size == 1 else "bytes")
-        if size < BYTES_PER_KIB:
-            return bytes_str
-
-        bytes_str = "(" + bytes_str + ")"
-
-        if size >= BYTES_PER_TIB:
-            short_str = "{:.2f} TiB ".format(size / BYTES_PER_TIB)
-        elif size >= BYTES_PER_GIB:
-            short_str = "{:.2f} GiB ".format(size / BYTES_PER_GIB)
-        elif size >= BYTES_PER_MIB:
-            short_str = "{:.2f} MiB ".format(size / BYTES_PER_MIB)
-        else:
-            short_str = "{:.2f} KiB ".format(size / BYTES_PER_KIB)
-
-        return short_str + bytes_str
+        return get_size_str(size)
 
     def update_last_open_date(self):
         self.last_open_date = datetime.date.today()
