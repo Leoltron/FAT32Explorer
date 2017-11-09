@@ -543,6 +543,7 @@ class Fat32Editor(Fat32Reader):
             last_open_date=last_access_date,
             attributes=attributes)
 
+        file.parent = directory
         first_cluster, size_bytes = self._write_external_file_content(path,
                                                                       file)
 
@@ -555,7 +556,6 @@ class Fat32Editor(Fat32Reader):
                 directory._start_cluster)).hex_readable(0,
                                                         BYTES_PER_DIR_ENTRY))
 
-        file.parent = directory
         return file
 
     def _write_external_file_content(self, external_path, file):
@@ -566,6 +566,14 @@ class Fat32Editor(Fat32Reader):
             file.content = list()
             first_cluster = file._start_cluster = \
                 self._write_content_and_get_first_cluster(bytes(cluster_size))
+            file._size_bytes = 0
+
+            self._append_content_to_dir(file, file.to_directory_entries(
+                custom_name='.'))
+            if file.parent:
+                self._append_content_to_dir(file,
+                                            file.parent.to_directory_entries(
+                                                custom_name='..'))
 
             for name in os.listdir(external_path):
                 path = os.path.join(external_path.absolute(), name)

@@ -175,12 +175,17 @@ class File:
             return content[:self._size_bytes]
         return content
 
-    def to_directory_entries(self):
+    def to_directory_entries(self, custom_name=None):
         entries = list()
 
-        if requires_lfn(self.name, self.parent):
-            entries += to_lfn_parts(self.name,
-                                    get_short_name_checksum(self.short_name))
+        name = custom_name or self.name
+        parent = None if name == '.' or name == '..' else self.parent
+        short_name = get_short_name(custom_name, parent) if custom_name \
+            else self.short_name
+
+        if requires_lfn(name, parent):
+            entries += to_lfn_parts(name,
+                                    get_short_name_checksum(short_name))
 
         file_info_entry = bytearray(32)
         file_info_entry[11] = self.attributes
@@ -300,7 +305,7 @@ def to_lfn_parts(name, checksum=0):
     name_bytes = name.encode("utf-16")
     parts = list()
     i = 0
-    part_number = 0
+    part_number = 1
     while i < len(name_bytes):
         part = bytearray(32)
         for pos in get_utf16_char_pos():
