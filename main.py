@@ -32,7 +32,7 @@ SCANDISK_ARGS = ["-l", "-i", "-z"]
 
 
 def main():
-    if '-h' in sys.argv:
+    if len(sys.argv) == 1 or '-h' in sys.argv:
         print_usage()
 
     scandisk = False
