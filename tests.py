@@ -318,6 +318,12 @@ class WriterTests(unittest.TestCase):
             actual = fat_editor.get_lfn_part(part)[0] + actual
         self.assertEqual(actual, name)
 
+    def test_turn_short(self):
+        name = "qwertyuioiuhgfdsxdcfgtDASDASDAdd12312312.png"
+        short_name = fs_objects.get_short_name(name, None)
+        self.assertEqual(short_name, "QWERTY~1.PNG")
+
+
 
 if __name__ == '__main__':
     unittest.main()

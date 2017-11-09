@@ -529,8 +529,7 @@ class Fat32Editor(Fat32Reader):
             directory = find_directory(root, internal_path)
 
         name = ("/" + str(path).replace("\\", "/")).split("/")[-1]
-        short_name = '.'.join(fs_objects.
-                              get_short_name(name, directory=directory))
+        short_name = fs_objects.get_short_name(name, directory=directory)
         attributes = fs_objects.DIRECTORY if path.is_dir() else 0
 
         creation_datetime, last_access_date, modification_datetime = \

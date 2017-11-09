@@ -274,7 +274,7 @@ def get_short_name_and_ext_checksum(name, extension=""):
     return checksum
 
 
-def get_short_name(name, directory: File = None):
+def get_short_name(name: str, directory: File = None):
     splitted_name = name.rsplit('.', maxsplit=1)
     name = splitted_name[0]
     extension = "" if len(splitted_name) == 1 else splitted_name[1]
@@ -293,7 +293,7 @@ def get_short_name(name, directory: File = None):
             i += 1
             name = name[:7] + str(i)
 
-    return name + '.' + extension
+    return name + ('.' + extension if extension else "")
 
 
 def to_lfn_parts(name, checksum=0):
@@ -329,7 +329,5 @@ def get_utf16_char_pos():
 
 
 def requires_lfn(name, directory=None):
-    short_name_splitted = get_short_name(name, directory)
-    short_name = short_name_splitted[0] + (("." + short_name_splitted[1])
-                                           if short_name_splitted[1] else "")
+    short_name = get_short_name(name, directory)
     return name != short_name
