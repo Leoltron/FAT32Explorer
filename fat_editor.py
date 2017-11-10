@@ -12,7 +12,7 @@ import fs_objects
 BYTES_PER_DIR_ENTRY = 32
 BYTES_PER_FAT32_ENTRY = 4
 
-DEBUG_MODE = False
+DEBUG_MODE = True
 
 
 def debug(message):
@@ -524,9 +524,9 @@ class Fat32Editor(Fat32Reader):
         if not path.exists():
             raise FileNotFoundError(str(path) + " not found.")
 
-        root = self.get_root_directory()
         if directory is None:
-            directory = find_directory(root, internal_path)
+            directory = find_directory(self.get_root_directory(),
+                                       internal_path)
 
         name = ("/" + str(path).replace("\\", "/")).split("/")[-1]
         short_name = fs_objects.get_short_name(name, directory=directory)
@@ -559,9 +559,11 @@ class Fat32Editor(Fat32Reader):
         return file
 
     def _write_external_file_content(self, external_path, file):
+        # print("called self._write_external_file_content("+str(external_path)+", <file, file.name = "+file.name+">)")
         cluster_size = self.get_cluster_size()
         clusters = list()
         size_bytes = 0
+        ext_path_abs = str(external_path.absolute())
         if external_path.is_dir():
             file.content = list()
             first_cluster = file._start_cluster = \
@@ -569,17 +571,18 @@ class Fat32Editor(Fat32Reader):
             file._size_bytes = 0
 
             self._append_content_to_dir(file, file.to_directory_entries(
-                custom_name='.'))
+                is_dot_self_entry=True))
             if file.parent:
                 self._append_content_to_dir(file,
                                             file.parent.to_directory_entries(
-                                                custom_name='..'))
+                                                is_dot_parent_entry=True))
 
-            for name in os.listdir(external_path):
-                path = os.path.join(external_path.absolute(), name)
+            for name in os.listdir(ext_path_abs):
+                path = os.path.join(ext_path_abs, name)
+                #print('called file.content.append(self.write_to_image('+path+', "", <file, file.name = '+file.name+'>))')
                 file.content.append(self.write_to_image(path, "", file))
         else:
-            with open(str(external_path.absolute()), 'rb') as f:
+            with open(ext_path_abs, 'rb') as f:
                 f.seek(0)
                 while True:
                     b = f.read(cluster_size)

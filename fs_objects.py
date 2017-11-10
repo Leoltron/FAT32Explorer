@@ -175,22 +175,35 @@ class File:
             return content[:self._size_bytes]
         return content
 
-    def to_directory_entries(self, custom_name=None):
+    def to_directory_entries(self, is_dot_self_entry=False,
+                             is_dot_parent_entry=False):
         entries = list()
 
-        name = custom_name or self.name
-        parent = None if name == '.' or name == '..' else self.parent
-        short_name = get_short_name(custom_name, parent) if custom_name \
-            else self.short_name
+        if is_dot_self_entry and is_dot_parent_entry:
+            raise ValueError(
+                "Trying to form both self and parent 'dot' entry?")
 
-        if requires_lfn(name, parent):
-            entries += to_lfn_parts(name,
-                                    get_short_name_checksum(short_name))
+        if is_dot_parent_entry:
+            short_name = '..'
+        elif is_dot_self_entry:
+            short_name = '.'
+        else:
+            name = self.name
+            short_name = self.short_name
+
+            if requires_lfn(name, self.parent):
+                entries += to_lfn_parts(name,
+                                        get_short_name_checksum(short_name))
 
         file_info_entry = bytearray(32)
         file_info_entry[11] = self.attributes
 
-        self._write_short_name(file_info_entry)
+        if is_dot_parent_entry or is_dot_self_entry:
+            self._write_short_name(file_info_entry,
+                                   custom_short_name=short_name,
+                                   custom_short_ext='')
+        else:
+            self._write_short_name(file_info_entry)
         self._write_dates(file_info_entry)
         self._write_size(file_info_entry)
         self._write_start_cluster_number(file_info_entry)
@@ -212,11 +225,19 @@ class File:
             file_info_entry[28:28 + 4] = \
                 bytes_parsers.int_to_bytes(4, self.size_bytes, "little")
 
-    def _write_short_name(self, file_info_entry):
+    def _write_short_name(self, file_info_entry, custom_short_name=None,
+                          custom_short_ext=None):
         splitted_short_name = self.short_name.rsplit(".", 1)
-        name_part = splitted_short_name[0][:8]
-        extension_part = "" if len(splitted_short_name) == 1 else \
-            splitted_short_name[1][:3]
+        if custom_short_name is None:
+            name_part = splitted_short_name[0][:8]
+        else:
+            name_part = custom_short_name[:8]
+
+        if custom_short_ext is not None:
+            extension_part = custom_short_ext[:3]
+        else:
+            extension_part = ("" if len(splitted_short_name) == 1 else \
+                                  splitted_short_name[1][:3])
 
         name_part_bytes = name_part.encode(encoding="cp866", errors="strict")
         name_part_bytes += b'\x20' * (8 - len(name_part_bytes))
@@ -285,7 +306,7 @@ def get_short_name(name: str, directory: File = None):
     extension = "" if len(splitted_name) == 1 else splitted_name[1]
 
     name = name.replace(".", "")
-    name = re.sub(r"[^a-zA-Z]", "_", name).upper()
+    name = re.sub(r"[^0-9a-zA-Zа-яА-ЯёЁ!#$%&'()\-@^_`{}~]", "_", name).upper()
     extension = extension[:3].upper()
 
     if len(name) > 8 or (directory is not None and directory

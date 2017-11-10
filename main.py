@@ -34,6 +34,7 @@ SCANDISK_ARGS = ["-l", "-i", "-z"]
 def main():
     if len(sys.argv) == 1 or '-h' in sys.argv:
         print_usage()
+        return
 
     scandisk = False
     find_lost_sectors = False
@@ -49,7 +50,7 @@ def main():
                 find_intersecting_chains = True
             elif sys.argv[start] == '-z':
                 check_files_size = True
-            else:
+            elif sys.argv[start] != '-s':
                 break
             start += 1
 
