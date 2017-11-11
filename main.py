@@ -24,8 +24,8 @@
 #   3. 2 образа: нормальный и с ошибками
 
 import sys
-import fat_editor
-from directory_browser import DirectoryBrowser
+import fateditor
+from dirbrowser import DirectoryBrowser
 from pathlib import Path
 
 SCANDISK_ARGS = ["-l", "-i", "-z"]
@@ -42,7 +42,7 @@ def main():
     check_files_size = False
     if sys.argv[1] in ['-s'] + SCANDISK_ARGS:
         scandisk = True
-        start = 2
+        start = 1
         while start < len(sys.argv):
             if sys.argv[start] == '-l':
                 find_lost_sectors = True
@@ -69,7 +69,7 @@ def main():
         return
 
     with open(image_file_name, "r+b") as fi:
-        f = fat_editor.Fat32Editor(fi)
+        f = fateditor.Fat32Editor(fi, scandisk)
         if f.valid:
             print("Image successfully parsed.")
         if scandisk:

@@ -5,7 +5,7 @@ import shutil
 import subprocess
 import sys
 
-import fs_objects
+import fsobjects
 from bytes_parsers import BytesParser
 
 DATETIME_FORMAT = "%d.%m.%Y %H:%M:%S"
@@ -80,10 +80,10 @@ def print_dir_content(directory, names_only, recursive):
 
 def print_dir_help():
     print(
-        "dir                     - prints the content of current"
+        "dir                      - prints the content of current"
         " directory\n"
-        "   /b                   - print only file names\n"
-        "   /s                   - print files of directory and all"
+        "   /b                    - print only file names\n"
+        "   /s                    - print files of directory and all"
         " its subdirectories.\n")
 
 
@@ -108,7 +108,7 @@ def save_file_at_external(file, path, fat_reader):
             raise DirectoryBrowserError("Error: permission denied.")
 
 
-def find(name, source, priority=None) -> fs_objects.File:
+def find(name, source, priority=None) -> fsobjects.File:
     if len(name) > 2 and name[0] == '"' and name[-1] == '"':
         name = name[1:-1]
     dirs = name.split("/", maxsplit=1)
@@ -186,19 +186,19 @@ class DirectoryBrowser:
     # noinspection PyUnusedLocal
     @reg_command(_commands, "help")
     def print_help(self, args):
-        print("cd <directory>          - changes directory\n")
+        print("cd <directory>           - changes directory\n")
         print_dir_help()
-        print("info <file>             - prints info about the file\n"
-              "help                    - print this\n"
-              "open <file>             - cd, if file is a directory, otherwise"
+        print("info <file>              - prints info about the file\n"
+              "help                     - print this\n"
+              "open <file>              - cd, if file is a directory, otherwise"
               " make a "
               "temporary copy of the file and try to open it trough system\n"
-              "copyToExternal          - copy file to external path"
-              "type <file> <encoding>  - prints file content as if it were "
+              "copyToExternal           - copy file to external path"
+              "type <file> <encoding>   - prints file content as if it were "
               "text file\n"
-              "hex <file> <line length>- prints file content"
+              "hex <file> <line length> - prints file content"
               " as bytes in hex form\n"
-              "quit                    - quits the interactive mode")
+              "quit                     - quits the interactive mode")
 
     # noinspection PyUnusedLocal
     @reg_command(_commands, "quit")
@@ -362,7 +362,7 @@ class DirectoryBrowser:
         except Exception as e:
             raise  # DirectoryBrowserError(str(e))
 
-    def find(self, name, source=None, priority=None) -> fs_objects.File:
+    def find(self, name, source=None, priority=None) -> fsobjects.File:
         if source is None:
             source = self.current
         return find(name=name, source=source, priority=priority)

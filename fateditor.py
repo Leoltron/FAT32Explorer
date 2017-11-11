@@ -4,10 +4,10 @@ import datetime
 import math
 import pathlib
 import os
-import directory_browser
+import dirbrowser
 from bytes_parsers import FileBytesParser, BytesParser
 
-import fs_objects
+import fsobjects
 
 BYTES_PER_DIR_ENTRY = 32
 BYTES_PER_FAT32_ENTRY = 4
@@ -59,7 +59,7 @@ def get_lfn_part(entry_bytes):
 
 def parse_file_info(entry_parser, long_file_name_buffer=""):
     attributes = entry_parser.parse_int_unsigned(11, 1)
-    is_directory = bool(attributes & fs_objects.DIRECTORY)
+    is_directory = bool(attributes & fsobjects.DIRECTORY)
 
     name_part = entry_parser.parse_string(0, 8, "cp866", "strict").strip()
     extension_part = entry_parser.parse_string(8, 3, "cp866",
@@ -81,13 +81,13 @@ def parse_file_info(entry_parser, long_file_name_buffer=""):
 
     file_size_bytes = entry_parser.parse_int_unsigned(0 + 28, 4)
 
-    return fs_objects.File(short_name,
-                           long_file_name_buffer,
-                           attributes,
-                           creation_datetime,
-                           last_access_date,
-                           last_modification_datetime,
-                           file_size_bytes)
+    return fsobjects.File(short_name,
+                          long_file_name_buffer,
+                          attributes,
+                          creation_datetime,
+                          last_access_date,
+                          last_modification_datetime,
+                          file_size_bytes)
 
 
 def validate_fs_info(fs_info_bytes):
@@ -98,15 +98,15 @@ def validate_fs_info(fs_info_bytes):
 
 
 def find_directory(source, internal_path):
-    dir = directory_browser.find(
+    dir = dirbrowser.find(
         name=internal_path,
         source=source,
         priority='directory')
     if dir is None:
-        raise directory_browser. \
+        raise dirbrowser. \
             DirectoryBrowserError('"' + internal_path + '" not found.')
     if not dir.is_directory:
-        raise directory_browser. \
+        raise dirbrowser. \
             DirectoryBrowserError(
             '"' + internal_path + '" is not a directory.')
     return dir
@@ -126,9 +126,9 @@ def print_no_new_line(s, **kwargs):
 
 
 class Fat32Reader:
-    _log_clusters_usage = False
-    _log_clusters_usage_adv = False
-    _repair_file_size_mode = False
+    log_clusters_usage = False
+    log_clusters_usage_adv = False
+    repair_file_size_mode = False
     used_clusters = dict()
     errors_found = 0
     errors_repaired = 0
@@ -143,9 +143,9 @@ class Fat32Reader:
         self._validate_fat(do_raise=not print_scan_info)
         self._parse_data_area()
 
-    def scan_info(self, s):
+    def scan_info(self, s, **kwargs):
         if self._print_scan_info:
-            print(s)
+            print(s, **kwargs)
 
     def _parse_data_area(self):
         self._data_area_start = self._sectors_to_bytes(self.reserved_sectors
@@ -165,16 +165,19 @@ class Fat32Reader:
         self.boot_sector_copy_sector = bytes_parser.parse_int_unsigned(0x32, 2)
 
     def _read_and_validate_fs_info(self):
+        self.scan_info("Validating FS INFO sector...")
         fs_info_bytes = self._sector_slice(self._fs_info_sector)
         try:
             validate_fs_info(fs_info_bytes)
         except ValueError:
             if self._print_scan_info:
-                print(
-                    "Incorrect format of FS Info sector, FAT32 validation failed.")
+                print("Incorrect format of FS Info sector, "
+                      "FAT32 validation failed.")
                 self.valid = False
             else:
                 raise
+        else:
+            self.scan_info("FS INFO sector is valid.")
 
         parser = BytesParser(fs_info_bytes)
         self._free_clusters = \
@@ -232,12 +235,12 @@ class Fat32Reader:
         return self._sector_slice(start, end)
 
     def get_root_directory(self):
-        if self._log_clusters_usage or self._log_clusters_usage_adv:
+        if self.log_clusters_usage or self.log_clusters_usage_adv:
             for cluster in self._get_cluster_chain(
                     self.root_catalog_first_cluster):
                 self.used_clusters[cluster] = True
-        root = fs_objects.File("", "", fs_objects.DIRECTORY, None, None, None,
-                               0, self.root_catalog_first_cluster)
+        root = fsobjects.File("", "", fsobjects.DIRECTORY, None, None, None,
+                              0, self.root_catalog_first_cluster)
         root.content = self._parse_dir_files(
             self.get_data_from_cluster_chain(self.root_catalog_first_cluster),
             root)
@@ -264,7 +267,7 @@ class Fat32Reader:
             entry_parser = BytesParser(entry_bytes)
             attributes = entry_parser.parse_int_unsigned(11, 1)
 
-            if attributes == fs_objects.LFN:  # Long file name entry
+            if attributes == fsobjects.LFN:  # Long file name entry
                 lfn_part, lfn_checksum = get_lfn_part(entry_bytes)
                 long_file_name_buffer = lfn_part + \
                                         long_file_name_buffer
@@ -274,7 +277,7 @@ class Fat32Reader:
                           .format(lfn_checksum_buffer, lfn_checksum))
                 lfn_checksum_buffer = lfn_checksum
 
-            elif attributes & fs_objects.VOLUME_ID:
+            elif attributes & fsobjects.VOLUME_ID:
                 # TODO: Чтение Volume ID
                 pass
             else:
@@ -282,11 +285,11 @@ class Fat32Reader:
                     file = self._parse_file_entry(entry_parser,
                                                   long_file_name_buffer,
                                                   lfn_checksum_buffer)
-                    requires_size_check = self._repair_file_size_mode and \
+                    requires_size_check = self.repair_file_size_mode and \
                                           not file.is_directory
                     requires_cluster_usage_logging = \
-                        self._log_clusters_usage \
-                        or self._log_clusters_usage_adv
+                        self.log_clusters_usage \
+                        or self.log_clusters_usage_adv
                     if requires_cluster_usage_logging or \
                             requires_size_check:
                         cluster_size = self.get_cluster_size()
@@ -297,11 +300,10 @@ class Fat32Reader:
                         cluster_num = \
                             chain[
                                 cluster_seq_num]
-                        start_sector, _ = \
+                        start_bytes, _ = \
                             self._get_cluster_start_end_relative_to_data_start(
                                 cluster_num)
-                        entry_start = self._sectors_to_bytes(
-                            start_sector) + entry_start_in_cluster
+                        entry_start = start_bytes + entry_start_in_cluster + self._data_area_start
                     if requires_cluster_usage_logging:
                         self._log_file_clusters_usage(file=file,
                                                       entry_start=entry_start)
@@ -336,7 +338,7 @@ class Fat32Reader:
                               "parent directory."))
 
         if long_file_name_buffer:
-            checksum = fs_objects.get_short_name_checksum(file.short_name)
+            checksum = fsobjects.get_short_name_checksum(file.short_name)
             if checksum != lfn_checksum:
                 debug("Warning: file short name checksum {:d} is not equal to "
                       "LFN checksum {:d}".format(checksum, lfn_checksum))
@@ -405,17 +407,24 @@ class Fat32Reader:
             raise EOFError
 
     def _validate_fat(self, do_raise=True):
+        self.scan_info("Validating FAT tables equality...")
         prev_fat = None
         for i in range(self.fat_amount):
             fat = self._get_fat(i)
-            if prev_fat is not None and prev_fat != fat:
-                error_message = "File allocation tables #{:d} " \
-                                "and #{:d} are not equal!".format(i, i - 1)
-                self.valid = False
-                if do_raise:
-                    raise ValueError(error_message)
+            if prev_fat is not None:
+                self.scan_info("Comparing FAT #{:d} and #{:d} ... "
+                               "".format(i - 1, i),
+                               flush=True, end='')
+                if prev_fat != fat:
+                    error_message = "File allocation tables #{:d} " \
+                                    "and #{:d} are not equal!".format(i - 1, i)
+                    self.valid = False
+                    if do_raise:
+                        raise ValueError(error_message)
+                    else:
+                        self.scan_info(error_message)
                 else:
-                    self.scan_info(error_message)
+                    self.scan_info("OK")
             prev_fat = fat
 
     def get_fat_value(self, cluster):
@@ -516,7 +525,7 @@ class Fat32Editor(Fat32Reader):
         return free_clusters
 
     def write_to_image(self, external_path, internal_path,
-                       directory=None) -> fs_objects.File:
+                       directory=None) -> fsobjects.File:
         """
         Writes file to image, returns File
         """
@@ -529,13 +538,13 @@ class Fat32Editor(Fat32Reader):
                                        internal_path)
 
         name = ("/" + str(path.absolute()).replace("\\", "/")).split("/")[-1]
-        short_name = fs_objects.get_short_name(name, directory=directory)
-        attributes = fs_objects.DIRECTORY if path.is_dir() else 0
+        short_name = fsobjects.get_short_name(name, directory=directory)
+        attributes = fsobjects.DIRECTORY if path.is_dir() else 0
 
         creation_datetime, last_access_date, modification_datetime = \
             get_time_stamps(external_path)
 
-        file = fs_objects.File(
+        file = fsobjects.File(
             long_name=name,
             short_name=short_name,
             create_datetime=creation_datetime,
@@ -579,7 +588,7 @@ class Fat32Editor(Fat32Reader):
 
             for name in os.listdir(ext_path_abs):
                 path = os.path.join(ext_path_abs, name)
-                #print('called file.content.append(self.write_to_image('+path+', "", <file, file.name = '+file.name+'>))')
+                # print('called file.content.append(self.write_to_image('+path+', "", <file, file.name = '+file.name+'>))')
                 file.content.append(self.write_to_image(path, "", file))
         else:
             with open(ext_path_abs, 'rb') as f:
@@ -764,13 +773,13 @@ class Fat32Editor(Fat32Reader):
         if not self.valid:
             print("Critical error, cannot continue")
             return
-        self._log_clusters_usage = find_lost_sectors
-        self._log_clusters_usage_adv = find_intersecting_chains
-        self._repair_file_size_mode = check_files_size
+        self.log_clusters_usage = find_lost_sectors
+        self.log_clusters_usage_adv = find_intersecting_chains
+        self.repair_file_size_mode = check_files_size
         self.errors_found = 0
         self.errors_repaired = 0
         self.get_root_directory()
-        if self._log_clusters_usage:
+        if self.log_clusters_usage:
             self.scan_for_lost_clusters()
         print("Errors found: {:d}, errors repaired: {:d}"
               .format(self.errors_found, self.errors_repaired))
@@ -783,11 +792,11 @@ class Fat32Editor(Fat32Reader):
         bytes_per_cluster = self.sectors_per_cluster * self.bytes_per_sector
         max_size_bytes = file_clusters_amount * bytes_per_cluster
         print_no_new_line(", max size: " +
-                          str(fs_objects.get_size_str(max_size_bytes)))
+                          str(fsobjects.get_size_str(max_size_bytes)))
         if file.size_bytes > max_size_bytes:
             self.errors_found += 1
             print_no_new_line(" - reducing file size in entry... ")
-            file.size_bytes = max_size_bytes
+            file._size_bytes = max_size_bytes
             self._write_content_to_image(entry_start + 28, int.to_bytes(
                 max_size_bytes, length=4, byteorder='little'))
             self.errors_repaired += 1
