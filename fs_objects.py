@@ -341,7 +341,8 @@ def to_lfn_parts(name, checksum=0):
                 part[pos:pos + 1] = b'\xff\xff'
                 i += 2
 
-        part[0] = part_number if i < len(name) else 0x40 + part_number
+        part[0] = part_number if i < len(name_bytes) else 0x40 + part_number
+        # print(hex(part[0]) + " = "+str(part_number)+" if "+str(i)+" < "+str(len(name_bytes))+ " else 0x40 + "+str(part_number))
         part[0x0b] = LFN
         part[0x0d] = checksum
         parts.append(bytes(part))

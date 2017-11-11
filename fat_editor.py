@@ -12,7 +12,7 @@ import fs_objects
 BYTES_PER_DIR_ENTRY = 32
 BYTES_PER_FAT32_ENTRY = 4
 
-DEBUG_MODE = True
+DEBUG_MODE = False
 
 
 def debug(message):
@@ -528,7 +528,7 @@ class Fat32Editor(Fat32Reader):
             directory = find_directory(self.get_root_directory(),
                                        internal_path)
 
-        name = ("/" + str(path).replace("\\", "/")).split("/")[-1]
+        name = ("/" + str(path.absolute()).replace("\\", "/")).split("/")[-1]
         short_name = fs_objects.get_short_name(name, directory=directory)
         attributes = fs_objects.DIRECTORY if path.is_dir() else 0
 
