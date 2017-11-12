@@ -8,7 +8,9 @@ import platform
 import fsobjects
 from bytes_parsers import BytesParser
 
-COMMAND_USAGE_STR_LEN = 44
+HEX_COMMAND_USAGE = 'hex <file> <line length>'
+CP_TO_EXT_USAGE = "copyToExternal <image path> <external path>"
+TYPE_USAGE = 'type <encoding> <file>'
 
 DATETIME_FORMAT = "%d.%m.%Y %H:%M:%S"
 
@@ -18,9 +20,12 @@ def dispose_temp_files():
         shutil.rmtree("temp")
 
 
-def reg_command(dict_registry, name):
+def reg_command(dict_registry, name, usage=None, desc="", keys=list()):
+    if usage is None:
+        usage = name
+
     def reg(f):
-        dict_registry[name.lower()] = f
+        dict_registry[name.lower()] = (f, usage, desc, keys)
         return f
 
     return reg
@@ -82,12 +87,9 @@ def print_dir_content(directory, names_only, recursive):
 
 def print_dir_help():
     print(
-        "dir".ljust(
-            COMMAND_USAGE_STR_LEN) + "- prints the content of current directory\n"
-                                     "   /b".ljust(
-            COMMAND_USAGE_STR_LEN) + "- print only file names\n"
-                                     "   /s".ljust(
-            COMMAND_USAGE_STR_LEN) + "- print files of directory and all"
+        "dir - prints the content of current directory\n"
+        "   /b - print only file names\n"
+        "   /s - print files of directory and all"
         " its subdirectories.\n")
 
 
@@ -182,42 +184,37 @@ class DirectoryBrowser:
 
     def _process_command(self, command, args_string=""):
         if command.lower() in self._commands:
-            self._commands[command.lower()](self, args_string)
+            self._commands[command.lower()][0](self, args_string)
         else:
             print('Wrong command. '
                   'Print "help" to get list of available commands.')
 
     # noinspection PyUnusedLocal
-    @reg_command(_commands, "help")
+    @reg_command(_commands, "help", usage="help", desc="prints help")
     def print_help(self, args):
-        print("cd <directory>".ljust(
-            COMMAND_USAGE_STR_LEN) + "- changes directory\n")
-        print_dir_help()
-        print("info <file>".ljust(
-            COMMAND_USAGE_STR_LEN) + "- prints info about the file\n" +
-              "help".ljust(COMMAND_USAGE_STR_LEN) + "- print this\n" +
-              "open <file>".ljust(
-                  COMMAND_USAGE_STR_LEN) + "- cd, if file is a directory, otherwise"
-              " make a "
-                                           "temporary copy of the file and try to open it trough system\n" +
-              "copyToExternal <image path> <external path>".ljust(
-                  COMMAND_USAGE_STR_LEN) + "- copy file to external path\n"
-                                           "copyToImage <external path> <image path>    - copy file from external path to image"
-                                           "type <file> <encoding>".ljust(
-            COMMAND_USAGE_STR_LEN) + "- prints file content as if it were "
-              "text file\n"
-                                     "hex <file> <line length>".ljust(
-            COMMAND_USAGE_STR_LEN) + "- prints file content"
-              " as bytes in hex form\n"
-                                     "quit".ljust(
-            COMMAND_USAGE_STR_LEN) + "- quits the interactive mode")
+        command_names = list(self._commands.keys())
+        command_names.sort()
+        usage_max_len = max(len(c[1]) for c in self._commands.values())
+        for command_name in command_names:
+            value = self._commands[command_name]
+            usage = value[1]
+            desc = value[2]
+            print(usage.ljust(usage_max_len) + ' - ' + desc)
+
+            keys = value[3]
+            if len(keys) > 0:
+                max_key_len = max(len(k[0]) for k in keys)
+                for key, key_desc in keys:
+                    print('\t ' + key.ljust(max_key_len) + ' - ' + key_desc)
+                print()
 
     # noinspection PyUnusedLocal
-    @reg_command(_commands, "quit")
+    @reg_command(_commands, "quit", desc="quits the interactive mode")
     def stop_interactive_mode(self, args):
         self._int_running = False
 
-    @reg_command(_commands, "cd")
+    @reg_command(_commands, "cd", usage="cd <directory>",
+                 desc="changes directory")
     def change_directory(self, args):
         if len(args) == 0:
             raise DirectoryBrowserError("Usage: cd <folder name>")
@@ -254,7 +251,12 @@ class DirectoryBrowser:
                 ("Root" if self.current == self.root else "Current") +
                 " directory does not have a parent directory!")
 
-    @reg_command(_commands, "dir")
+    @reg_command(_commands, "dir", usage='dir [/b] [/s]',
+                 desc="prints the content of current directory",
+                 keys=[("/b", "print only file names"),
+                       ("/s",
+                        "print files of directory and all its subdirectories")]
+                 )
     def dir(self, args):
         flags = args.split(" ")
         if '/?' in flags:
@@ -265,7 +267,8 @@ class DirectoryBrowser:
         print('"' + self.current.get_absolute_path() + '" content:')
         print_dir_content(self.current, names_only, recursive)
 
-    @reg_command(_commands, "info")
+    @reg_command(_commands, "info", usage="info <file>",
+                 desc="prints info about the file")
     def info(self, args):
         file = self.find(args)
         if file is None:
@@ -282,23 +285,25 @@ class DirectoryBrowser:
         print("\tLast opened: " + file.last_open_date.strftime("%d.%m.%Y"))
         print("\tSize: " + file.get_size_str())
 
-    @reg_command(_commands, "copyToExternal")
+    @reg_command(_commands, "copyToExternal",
+                 usage=CP_TO_EXT_USAGE,
+                 desc="copy file to external storage")
     def copy_to_external(self, args):
         if "/?" in args:
-            raise DirectoryBrowserError("Usage: copyToExternal "
-                                        "<image path> <external path>")
+            raise DirectoryBrowserError("Usage: " + CP_TO_EXT_USAGE)
         try:
             image_file_path, external_file_path = parse_file_args(args, 2)
         except DirectoryBrowserError:
-            raise DirectoryBrowserError("Usage: copyToExternal "
-                                        "<image path> <external path>")
+            raise DirectoryBrowserError("Usage: " + CP_TO_EXT_USAGE)
 
         file = self.find(image_file_path)
         if file is None:
             raise DirectoryBrowserError(image_file_path + " not found.")
         save_file_at_external(file, external_file_path, self._fat_editor)
 
-    @reg_command(_commands, "open")
+    @reg_command(_commands, "open", usage='open <file>',
+                 desc="cd, if file is a directory, otherwise make a temporary"
+                      " copy of the file and try to open it trough system")
     def open(self, args):
         file = self.find(args)
         if file is None:
@@ -317,11 +322,12 @@ class DirectoryBrowser:
                 os.startfile(path.replace("/", "\\"))
         file.update_last_open_date()
 
-    @reg_command(_commands, "type")
+    @reg_command(_commands, "type", usage=TYPE_USAGE,
+                 desc='prints file content as if it were text file')
     def type(self, args):
         args_splitted = args.split(" ", maxsplit=1)
         if len(args_splitted) != 2:
-            raise DirectoryBrowserError('Usage: type <encoding> <file>')
+            raise DirectoryBrowserError('Usage: %s' % TYPE_USAGE)
         encoding = args_splitted[0]
         file_name = args_splitted[1]
         file = self.find(file_name, priority="file")
@@ -334,11 +340,13 @@ class DirectoryBrowser:
                                          encoding=encoding)
         print(text)
 
-    @reg_command(_commands, "hex")
+    @reg_command(_commands, "hex",
+                 usage=HEX_COMMAND_USAGE,
+                 desc='prints file content as bytes in hex form')
     def hex(self, args):
         args_splitted = args.rsplit(" ", maxsplit=1)
         if len(args_splitted) != 2:
-            raise DirectoryBrowserError('Usage: hex <file> <line length>')
+            raise DirectoryBrowserError('Usage: ' + HEX_COMMAND_USAGE)
         file_name = args_splitted[0]
         line_len_str = args_splitted[1]
 
@@ -363,7 +371,9 @@ class DirectoryBrowser:
                 line += format(byte_content[part], '02x')
             print(line)
 
-    @reg_command(_commands, "copyToImage")
+    @reg_command(_commands, "copyToImage",
+                 usage="copyToImage <external path> <image path>",
+                 desc="copy file from external path to image")
     def copy_to_image(self, args):
         external_path, image_path = parse_file_args(args, 2)
 
@@ -373,7 +383,7 @@ class DirectoryBrowser:
             self.root = self.current = self._fat_editor.get_root_directory()
             self.change_directory(current)
         except Exception as e:
-            raise  # DirectoryBrowserError(str(e))
+            raise DirectoryBrowserError(str(e))
 
     def find(self, name, source=None, priority=None) -> fsobjects.File:
         if source is None:
