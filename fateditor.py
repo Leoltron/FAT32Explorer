@@ -568,7 +568,6 @@ class Fat32Editor(Fat32Reader):
         return file
 
     def _write_external_file_content(self, external_path, file):
-        # print("called self._write_external_file_content("+str(external_path)+", <file, file.name = "+file.name+">)")
         cluster_size = self.get_cluster_size()
         clusters = list()
         size_bytes = 0
@@ -588,7 +587,6 @@ class Fat32Editor(Fat32Reader):
 
             for name in os.listdir(ext_path_abs):
                 path = os.path.join(ext_path_abs, name)
-                # print('called file.content.append(self.write_to_image('+path+', "", <file, file.name = '+file.name+'>))')
                 file.content.append(self.write_to_image(path, "", file))
         else:
             with open(ext_path_abs, 'rb') as f:
