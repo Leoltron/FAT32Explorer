@@ -3,10 +3,12 @@ import os
 import re
 import shutil
 import subprocess
-import sys
+import platform
 
 import fsobjects
 from bytes_parsers import BytesParser
+
+COMMAND_USAGE_STR_LEN = 44
 
 DATETIME_FORMAT = "%d.%m.%Y %H:%M:%S"
 
@@ -80,10 +82,12 @@ def print_dir_content(directory, names_only, recursive):
 
 def print_dir_help():
     print(
-        "dir                      - prints the content of current"
-        " directory\n"
-        "   /b                    - print only file names\n"
-        "   /s                    - print files of directory and all"
+        "dir".ljust(
+            COMMAND_USAGE_STR_LEN) + "- prints the content of current directory\n"
+                                     "   /b".ljust(
+            COMMAND_USAGE_STR_LEN) + "- print only file names\n"
+                                     "   /s".ljust(
+            COMMAND_USAGE_STR_LEN) + "- print files of directory and all"
         " its subdirectories.\n")
 
 
@@ -186,19 +190,27 @@ class DirectoryBrowser:
     # noinspection PyUnusedLocal
     @reg_command(_commands, "help")
     def print_help(self, args):
-        print("cd <directory>           - changes directory\n")
+        print("cd <directory>".ljust(
+            COMMAND_USAGE_STR_LEN) + "- changes directory\n")
         print_dir_help()
-        print("info <file>              - prints info about the file\n"
-              "help                     - print this\n"
-              "open <file>              - cd, if file is a directory, otherwise"
+        print("info <file>".ljust(
+            COMMAND_USAGE_STR_LEN) + "- prints info about the file\n" +
+              "help".ljust(COMMAND_USAGE_STR_LEN) + "- print this\n" +
+              "open <file>".ljust(
+                  COMMAND_USAGE_STR_LEN) + "- cd, if file is a directory, otherwise"
               " make a "
-              "temporary copy of the file and try to open it trough system\n"
-              "copyToExternal           - copy file to external path"
-              "type <file> <encoding>   - prints file content as if it were "
+                                           "temporary copy of the file and try to open it trough system\n" +
+              "copyToExternal <image path> <external path>".ljust(
+                  COMMAND_USAGE_STR_LEN) + "- copy file to external path\n"
+                                           "copyToImage <external path> <image path>    - copy file from external path to image"
+                                           "type <file> <encoding>".ljust(
+            COMMAND_USAGE_STR_LEN) + "- prints file content as if it were "
               "text file\n"
-              "hex <file> <line length> - prints file content"
+                                     "hex <file> <line length>".ljust(
+            COMMAND_USAGE_STR_LEN) + "- prints file content"
               " as bytes in hex form\n"
-              "quit                     - quits the interactive mode")
+                                     "quit".ljust(
+            COMMAND_USAGE_STR_LEN) + "- quits the interactive mode")
 
     # noinspection PyUnusedLocal
     @reg_command(_commands, "quit")
@@ -298,9 +310,10 @@ class DirectoryBrowser:
             path = "temp" + file.get_absolute_path()
             save_file_at_external(file, path, self._fat_editor)
 
-            if sys.platform == 'linux':
+            system = platform.system()
+            if system == 'Linux':
                 subprocess.call(["xdg-open", path])
-            else:
+            elif system == 'Windows':
                 os.startfile(path.replace("/", "\\"))
         file.update_last_open_date()
 

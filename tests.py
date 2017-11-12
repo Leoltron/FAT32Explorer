@@ -210,7 +210,7 @@ class FatReaderTests(unittest.TestCase):
 
         print("Extracting test images...")
         import zipfile
-        with zipfile.ZipFile("TEST-IMAGE.zip", "r") as zip_ref:
+        with zipfile.ZipFile(zip_path_str, "r") as zip_ref:
             zip_ref.extractall(TESTS_RES_DIR_NAME)
         print("done")
 
@@ -222,7 +222,7 @@ class FatReaderTests(unittest.TestCase):
 
     def test_image_corrupted(self):
         with open(get_test_image_path() + "-CORRUPTED", "r+b") as fi:
-            f = fateditor.Fat32Editor(fi)
+            f = fateditor.Fat32Editor(fi, True)
             f.scandisk(True, True, True)
             self.assert_test_image(f)
 
