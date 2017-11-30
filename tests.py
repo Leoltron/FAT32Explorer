@@ -208,21 +208,21 @@ class FatReaderTests(unittest.TestCase):
         request.urlretrieve(TEST_IMAGE_ARCHIVE_URL, zip_path_str)
         print("Download complete.")
 
-        print("Extracting test images...")
+        print("Extracting test images... ", end='')
         import zipfile
         with zipfile.ZipFile(zip_path_str, "r") as zip_ref:
             zip_ref.extractall(TESTS_RES_DIR_NAME)
-        print("done")
+        print("Done.")
 
     # noinspection SpellCheckingInspection
     def test_image(self):
         with open(get_test_image_path(), "rb") as fi:
-            f = fateditor.Fat32Editor(fi)
+            f = fateditor.Fat32Editor(fi, silent_scan=True)
             self.assert_test_image(f)
 
     def test_image_corrupted(self):
         with open(get_test_image_path() + "-CORRUPTED", "r+b") as fi:
-            f = fateditor.Fat32Editor(fi, True)
+            f = fateditor.Fat32Editor(fi, True, silent_scan=True)
             f.scandisk(True, True, True)
             self.assert_test_image(f)
 

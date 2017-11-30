@@ -92,8 +92,8 @@ def parse_file_info(entry_parser, long_file_name_buffer=""):
 
 def validate_fs_info(fs_info_bytes):
     if (fs_info_bytes[0:4] != b'\x52\x52\x61\x41' or
-                fs_info_bytes[0x1E4:0x1E4 + 4] != b'\x72\x72\x41\x61' or
-                fs_info_bytes[0x1FC:0x1FC + 4] != b'\x00\x00\x55\xAA'):
+            fs_info_bytes[0x1E4:0x1E4 + 4] != b'\x72\x72\x41\x61' or
+            fs_info_bytes[0x1FC:0x1FC + 4] != b'\x00\x00\x55\xAA'):
         raise ValueError("Incorrect format of FS Info sector")
 
 
@@ -133,7 +133,10 @@ class Fat32Reader:
     errors_found = 0
     errors_repaired = 0
 
-    def __init__(self, fat_image_file, print_scan_info=False):
+    def __init__(self, fat_image_file,
+                 print_scan_info=False,
+                 silent_scan=False):
+        self.silent_scan = silent_scan
         self.valid = True
 
         self._print_scan_info = print_scan_info
@@ -144,7 +147,7 @@ class Fat32Reader:
         self._parse_data_area()
 
     def scan_info(self, s, **kwargs):
-        if self._print_scan_info:
+        if self._print_scan_info and not self.silent_scan:
             print(s, **kwargs)
 
     def _parse_data_area(self):
@@ -334,8 +337,8 @@ class Fat32Reader:
             # "." - current directory
             raise ValueError("Entry refers to the " +
                              ("directory itself" if
-                              file.short_name == "." else
-                              "parent directory."))
+                             file.short_name == "." else
+                             "parent directory."))
 
         if long_file_name_buffer:
             checksum = fsobjects.get_short_name_checksum(file.short_name)
@@ -769,7 +772,7 @@ class Fat32Editor(Fat32Reader):
     def scandisk(self, find_lost_sectors, find_intersecting_chains,
                  check_files_size):
         if not self.valid:
-            print("Critical error, cannot continue")
+            self.scan_info("Critical error, cannot continue")
             return
         self.log_clusters_usage = find_lost_sectors
         self.log_clusters_usage_adv = find_intersecting_chains
@@ -779,42 +782,45 @@ class Fat32Editor(Fat32Reader):
         self.get_root_directory()
         if self.log_clusters_usage:
             self.scan_for_lost_clusters()
-        print("Errors found: {:d}, errors repaired: {:d}"
-              .format(self.errors_found, self.errors_repaired))
+            self.scan_info("Errors found: {:d}, errors repaired: {:d}"
+                           .format(self.errors_found, self.errors_repaired))
 
     def _repair_file_size(self, file, entry_start):
-        print('Checking "' + file.get_absolute_path() + '" file size...')
-        print_no_new_line("File size by entry: " + str(file.get_size_str()))
+        self.scan_info(
+            'Checking "' + file.get_absolute_path() + '" file size...')
+        self.scan_info("File size by entry: " + str(file.get_size_str()),
+                       end='')
         file_clusters_amount = len(
             self._get_cluster_chain(file._start_cluster))
         bytes_per_cluster = self.sectors_per_cluster * self.bytes_per_sector
         max_size_bytes = file_clusters_amount * bytes_per_cluster
-        print_no_new_line(", max size: " +
-                          str(fsobjects.get_size_str(max_size_bytes)))
+        self.scan_info(", max size: " +
+                       str(fsobjects.get_size_str(max_size_bytes)))
         if file.size_bytes > max_size_bytes:
             self.errors_found += 1
-            print_no_new_line(" - reducing file size in entry... ")
+            self.scan_info(" - reducing file size in entry... ", end='')
             file._size_bytes = max_size_bytes
             self._write_content_to_image(entry_start + 28, int.to_bytes(
                 max_size_bytes, length=4, byteorder='little'))
             self.errors_repaired += 1
-            print("Done.")
+            self.scan_info("Done.")
         else:
-            print(" - size is correct.")
+            self.scan_info(" - size is correct.")
 
     def _log_file_clusters_usage(self, file, entry_start):
-        print('Checking "' + file.get_absolute_path() + '" clusters:')
+        self.scan_info('Checking "' + file.get_absolute_path() + '" clusters:')
         clusters = self._get_cluster_chain(file._start_cluster)
         for i in range(len(clusters)):
             cluster = clusters[i]
-            print_no_new_line(
+            self.scan_info(
                 "Checking cluster #{:d} (of {:d}): {:d}".format(i + 1,
                                                                 len(clusters),
-                                                                cluster))
+                                                                cluster),
+                end='')
             if cluster in self.used_clusters:
                 self.errors_found += 1
-                print(" - cluster (and the rest of the chain) "
-                      "already used, copying content to another cluster")
+                self.scan_info(" - cluster (and the rest of the chain) "
+                               "already used, copying content to another cluster")
                 clusters_to_copy = clusters[i:]
                 prev_cluster = -1 if i == 0 else clusters[i - 1]
                 for cluster_to_copy in clusters_to_copy:
@@ -840,12 +846,13 @@ class Fat32Editor(Fat32Reader):
                 self.errors_repaired += 1
                 break
             else:
-                print(" - OK", end='\n' if i == len(clusters) - 1 else '\r',
-                      flush=True)
+                self.scan_info(" - OK",
+                               end='\n' if i == len(clusters) - 1 else '\r',
+                               flush=True)
                 self.used_clusters[cluster] = True
 
     def scan_for_lost_clusters(self):
-        print("Scanning for lost clusters")
+        self.scan_info("Scanning for lost clusters")
         total_clusters = self.sectors_per_fat * self.bytes_per_sector / BYTES_PER_FAT32_ENTRY
 
         parser = FileBytesParser(self._fat_image_file)
@@ -865,7 +872,7 @@ class Fat32Editor(Fat32Reader):
             new_progress = cluster_number * 100 // total_clusters
             if new_progress != progress:
                 progress = new_progress
-                print_no_new_line("Progress: {:.0f}%\r".format(progress))
+                self.scan_info("Progress: {:.0f}%\r".format(progress), end='')
             fat_value = parser.parse_int_unsigned(i, BYTES_PER_FAT32_ENTRY)
             fat_value = format_fat_address(fat_value)
 
@@ -876,11 +883,12 @@ class Fat32Editor(Fat32Reader):
             if cluster_number not in self.used_clusters and not \
                     (is_free or is_reserved or is_bad):
                 self.errors_found += 1
-                print_no_new_line(
+                self.scan_info(
                     "Cluster #{:d} is not used by any file but not "
-                    "marked as free, repairing... ".format(cluster_number))
+                    "marked as free, repairing... ".format(cluster_number),
+                    end='')
                 self._write_fat_value(cluster_number, 0)
-                print(" Done.")
+                self.scan_info(" Done.")
                 self.errors_repaired += 1
                 free_clusters += 1
             elif is_free:
@@ -899,16 +907,17 @@ class Fat32Editor(Fat32Reader):
         reserved_clusters_part = reserved_clusters / total_clusters * 100
         bad_clusters_part = bad_clusters / total_clusters * 100
 
-        print("Cluster usage:")
-        print("\t Total clusters: {:d} (100%)".format(total_clusters))
-        print("\t Free clusters: {:d} ({:.2f}%)".format(free_clusters,
-                                                        free_clusters_part))
-        print("\t Used clusters: {:d} ({:.2f}%)".format(used_clusters,
-                                                        used_clusters_part))
-        print("\t Reserved clusters: {:d} ({:.2f}%)".format(reserved_clusters,
-                                                            reserved_clusters_part))
-        print("\t Bad clusters: {:d} ({:.2f}%)".format(bad_clusters,
-                                                       bad_clusters_part))
+        self.scan_info("Cluster usage:")
+        self.scan_info("\t Total clusters: {:d} (100%)".format(total_clusters))
+        self.scan_info("\t Free clusters: {:d} ({:.2f}%)".format(free_clusters,
+                                                                 free_clusters_part))
+        self.scan_info("\t Used clusters: {:d} ({:.2f}%)".format(used_clusters,
+                                                                 used_clusters_part))
+        self.scan_info(
+            "\t Reserved clusters: {:d} ({:.2f}%)".format(reserved_clusters,
+                                                          reserved_clusters_part))
+        self.scan_info("\t Bad clusters: {:d} ({:.2f}%)".format(bad_clusters,
+                                                                bad_clusters_part))
 
 
 class FATReaderError(Exception):

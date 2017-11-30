@@ -32,7 +32,6 @@ def reg_command(dict_registry, name, usage=None, desc="", keys=list()):
 
 
 def _get_dir_content_names(file):
-    print(file.is_directory)
     if not file.is_directory:
         raise NotADirectoryError(file.name + " is not a directory!")
     for f in file.content:
