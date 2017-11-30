@@ -23,45 +23,24 @@
 #   2. В readme указать ссылку, откуда скачивать (Не требуется)
 #   3. 2 образа: нормальный и с ошибками
 
-import sys
 import fateditor
 from dirbrowser import DirectoryBrowser
 from pathlib import Path
-
-SCANDISK_ARGS = ["-l", "-i", "-z"]
+import argparse
 
 
 def main():
-    if len(sys.argv) == 1 or '-h' in sys.argv:
-        print_usage()
-        return
+    parsed_args = parse_args()
 
-    scandisk = False
-    find_lost_sectors = False
-    find_intersecting_chains = False
-    check_files_size = False
-    if sys.argv[1] in ['-s'] + SCANDISK_ARGS:
-        scandisk = True
-        start = 1
-        while start < len(sys.argv):
-            if sys.argv[start] == '-l':
-                find_lost_sectors = True
-            elif sys.argv[start] == '-i':
-                find_intersecting_chains = True
-            elif sys.argv[start] == '-z':
-                check_files_size = True
-            elif sys.argv[start] != '-s':
-                break
-            start += 1
+    find_lost_clusters = parsed_args.lost_clusters
+    find_intersecting_chains = parsed_args.intersections
+    check_files_size = parsed_args.size
+    scandisk = parsed_args.scandisk or \
+               find_lost_clusters or \
+               find_intersecting_chains or \
+               check_files_size
 
-        image_file_name = ' '.join(sys.argv[start:])
-    else:
-        image_file_name = ' '.join(sys.argv[1:])
-
-    if not image_file_name:
-        print_usage()
-        return
-
+    image_file_name = parsed_args.image_path
     image_file_path = Path(image_file_name)
 
     if not image_file_path.exists():
@@ -74,7 +53,7 @@ def main():
             print("Image successfully parsed.")
         if scandisk:
             f.scandisk(
-                find_lost_sectors,
+                find_lost_clusters,
                 find_intersecting_chains,
                 check_files_size
             )
@@ -82,8 +61,25 @@ def main():
             DirectoryBrowser(fat_editor=f).start_interactive_mode()
 
 
-def print_usage():
-    print("Usage: " + sys.argv[0] + " [-s] [-l] [-i] [-z] [-h] <file_name>")
+def parse_args():
+    parser = argparse.ArgumentParser(description="Open FAT32 image")
+
+    parser.add_argument("image_path", type=str,
+                        help="Path to the FAT32 image")
+
+    parser.add_argument("-s", "--scandisk",
+                        action="store_true",
+                        help="Basic validation scan")
+    parser.add_argument("-i", "--intersections",
+                        action="store_true",
+                        help="Scan, find and repair file chain intersections")
+    parser.add_argument("-l", "--lost-clusters",
+                        action="store_true",
+                        help="Scan, find and free lost clusters")
+    parser.add_argument("-z", "--size",
+                        action="store_true",
+                        help="Scan, find and repair incorrect files' size")
+    return parser.parse_args()
 
 
 if __name__ == '__main__':
