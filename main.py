@@ -1,12 +1,10 @@
 # !/usr/bin/env python3
+import argparse
 import platform
+from pathlib import Path
 
 import fateditor
 from dirbrowser import DirectoryBrowser
-from pathlib import Path
-import argparse
-
-SCANDISK_ARGS = ["-l", "-i", "-z"]
 
 
 def main():

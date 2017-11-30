@@ -1,12 +1,7 @@
 # !/usr/bin/env python3
 import datetime
-
-import os
-import re
-
-from pathlib import Path
-
 import itertools
+import re
 
 import bytes_parsers
 

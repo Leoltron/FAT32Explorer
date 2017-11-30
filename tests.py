@@ -1,10 +1,7 @@
 # !/usr/bin/env python3
 import datetime
-import unittest
-
-from pathlib import Path
-
 import os
+import unittest
 
 import dirbrowser
 import fateditor

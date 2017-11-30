@@ -1,8 +1,7 @@
 # !/usr/bin/env python3
 
-from datetime import datetime, date, time
-
 import os
+from datetime import datetime, date, time
 
 DEBUG_MODE = False
 

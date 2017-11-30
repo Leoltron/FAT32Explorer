@@ -1,9 +1,9 @@
 # !/usr/bin/env python3
 import os
+import platform
 import re
 import shutil
 import subprocess
-import platform
 
 import fsobjects
 from bytes_parsers import BytesParser

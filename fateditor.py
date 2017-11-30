@@ -1,13 +1,13 @@
 # !/usr/bin/env python3
-import itertools
 import datetime
+import itertools
 import math
-import pathlib
 import os
-import dirbrowser
-from bytes_parsers import FileBytesParser, BytesParser
+import pathlib
 
+import dirbrowser
 import fsobjects
+from bytes_parsers import FileBytesParser, BytesParser
 
 BYTES_PER_DIR_ENTRY = 32
 BYTES_PER_FAT32_ENTRY = 4
