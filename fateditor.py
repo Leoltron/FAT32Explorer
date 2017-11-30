@@ -175,7 +175,8 @@ class Fat32Reader:
                       "FAT32 validation failed.")
                 self.valid = False
             else:
-                raise
+                raise FATReaderError("Incorrect format of FS Info sector, "
+                                     "image either corrupted or it's not FAT32")
         else:
             self.scan_info("FS INFO sector is valid.")
 
@@ -278,7 +279,6 @@ class Fat32Reader:
                 lfn_checksum_buffer = lfn_checksum
 
             elif attributes & fsobjects.VOLUME_ID:
-                # TODO: Чтение Volume ID
                 pass
             else:
                 try:
@@ -420,7 +420,7 @@ class Fat32Reader:
                                     "and #{:d} are not equal!".format(i - 1, i)
                     self.valid = False
                     if do_raise:
-                        raise ValueError(error_message)
+                        raise FATReaderError(error_message)
                     else:
                         self.scan_info(error_message)
                 else:
@@ -568,7 +568,6 @@ class Fat32Editor(Fat32Reader):
         return file
 
     def _write_external_file_content(self, external_path, file):
-        # print("called self._write_external_file_content("+str(external_path)+", <file, file.name = "+file.name+">)")
         cluster_size = self.get_cluster_size()
         clusters = list()
         size_bytes = 0
@@ -588,7 +587,6 @@ class Fat32Editor(Fat32Reader):
 
             for name in os.listdir(ext_path_abs):
                 path = os.path.join(ext_path_abs, name)
-                # print('called file.content.append(self.write_to_image('+path+', "", <file, file.name = '+file.name+'>))')
                 file.content.append(self.write_to_image(path, "", file))
         else:
             with open(ext_path_abs, 'rb') as f:
@@ -911,3 +909,9 @@ class Fat32Editor(Fat32Reader):
                                                             reserved_clusters_part))
         print("\t Bad clusters: {:d} ({:.2f}%)".format(bad_clusters,
                                                        bad_clusters_part))
+
+
+class FATReaderError(Exception):
+    def __init__(self, message='', *args):
+        super().__init__(*args)
+        self.message = message

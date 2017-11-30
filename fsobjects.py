@@ -323,7 +323,7 @@ def get_short_name(name: str, directory: File = None):
 
 
 def to_lfn_parts(name, checksum=0):
-    name_bytes = name.encode("utf-16")
+    name_bytes = name.encode("utf-16")[2:]
     parts = list()
     i = 0
     part_number = 1
@@ -342,7 +342,6 @@ def to_lfn_parts(name, checksum=0):
                 i += 2
 
         part[0] = part_number if i < len(name_bytes) else 0x40 + part_number
-        # print(hex(part[0]) + " = "+str(part_number)+" if "+str(i)+" < "+str(len(name_bytes))+ " else 0x40 + "+str(part_number))
         part[0x0b] = LFN
         part[0x0d] = checksum
         parts.append(bytes(part))
