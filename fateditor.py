@@ -92,8 +92,8 @@ def parse_file_info(entry_parser, long_file_name_buffer=""):
 
 def validate_fs_info(fs_info_bytes):
     if (fs_info_bytes[0:4] != b'\x52\x52\x61\x41' or
-            fs_info_bytes[0x1E4:0x1E4 + 4] != b'\x72\x72\x41\x61' or
-            fs_info_bytes[0x1FC:0x1FC + 4] != b'\x00\x00\x55\xAA'):
+                fs_info_bytes[0x1E4:0x1E4 + 4] != b'\x72\x72\x41\x61' or
+                fs_info_bytes[0x1FC:0x1FC + 4] != b'\x00\x00\x55\xAA'):
         raise ValueError("Incorrect format of FS Info sector")
 
 
@@ -337,8 +337,8 @@ class Fat32Reader:
             # "." - current directory
             raise ValueError("Entry refers to the " +
                              ("directory itself" if
-                             file.short_name == "." else
-                             "parent directory."))
+                              file.short_name == "." else
+                              "parent directory."))
 
         if long_file_name_buffer:
             checksum = fsobjects.get_short_name_checksum(file.short_name)
@@ -470,15 +470,16 @@ def is_cluster_bad(cluster_fat_value):
 
 class Fat32Editor(Fat32Reader):
     def _write_fat_value(self, cluster, value):
+        reserved = self.get_fat_value(cluster) & 0xF0000000
         self._write_fat_bytes(cluster,
                               int.to_bytes(
-                                  value,
+                                  reserved | (value & 0x0FFFFFFF),
                                   length=BYTES_PER_FAT32_ENTRY,
                                   byteorder='little'
                               ))
 
     def _write_eof_fat_value(self, cluster):
-        self._write_fat_bytes(cluster, b'\xff' * BYTES_PER_FAT32_ENTRY)
+        self._write_fat_value(cluster, 0x0FFFFFFF)
 
     def _write_fat_bytes(self, cluster, bytes_):
         for i in range(self.fat_amount):
