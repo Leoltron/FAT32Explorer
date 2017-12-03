@@ -51,6 +51,10 @@ def main():
             error_message += " You might want to run this command " \
                              "as administrator."
         print(error_message)
+    except OSError as e:
+        print("OSError: " + str(e))
+        if not image_file_path.exists():
+            print('File "' + image_file_name + '" not found.')
 
 
 def parse_args():
