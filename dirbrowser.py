@@ -10,7 +10,7 @@ from bytes_parsers import BytesParser
 
 HEX_COMMAND_USAGE = 'hex <file> <line length>'
 CP_TO_EXT_USAGE = "copyToExternal <image path> <external path>"
-TYPE_USAGE = 'type <encoding> <file>'
+TYPE_USAGE = 'type [encoding (ascii by default)] <file>'
 
 DATETIME_FORMAT = "%d.%m.%Y %H:%M:%S"
 
@@ -330,17 +330,26 @@ class DirectoryBrowser:
                  desc='prints file content as if it were text file')
     def type(self, args):
         args_splitted = args.split(" ", maxsplit=1)
-        if len(args_splitted) != 2:
-            raise DirectoryBrowserError('Usage: %s' % TYPE_USAGE)
-        encoding = args_splitted[0]
-        file_name = args_splitted[1]
+        if len(args) == 0:
+            print(TYPE_USAGE)
+            return
+        elif len(args_splitted) == 1:
+            encoding = 'ascii'
+            file_name = args_splitted[0]
+        else:
+            encoding = args_splitted[0]
+            file_name = " ".join(args_splitted[1:])
         file = self.find(file_name, priority="file")
         if file is None:
             raise DirectoryBrowserError('File "' + file_name + '" not found.')
         if file.is_directory:
             raise DirectoryBrowserError('"' + file_name + '" is a directory.')
         bytes_parser = BytesParser(file.get_file_content(self._fat_editor))
-        text = bytes_parser.parse_string(0, len(bytes_parser),
+        if len(args_splitted) == 1:
+            text = bytes_parser. \
+                parse_ascii_string_replace_errors(0, len(bytes_parser))
+        else:
+            text = bytes_parser.parse_string(0, len(bytes_parser),
                                          encoding=encoding)
         print(text)
 

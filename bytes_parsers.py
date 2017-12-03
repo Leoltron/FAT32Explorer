@@ -29,6 +29,13 @@ class BytesParser:
         return self.get_bytes(start, length).decode(encoding=encoding,
                                                     errors=errors)
 
+    def parse_ascii_string_replace_errors(self, start, length,
+                                          replacement='\u2592'):
+        result = ""
+        for byte in self.get_bytes(start, length):
+            result += chr(byte) if byte in range(128) else replacement
+        return result
+
     def parse_time_date(self, start):
         parsed_time = self.parse_time(start)
         parsed_date = self.parse_date(start + 2)
