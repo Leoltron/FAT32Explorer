@@ -227,6 +227,9 @@ class DirectoryBrowser:
             prev_dir = self.current
             if args[0] == '/':
                 self.current = self.root
+                if args == '/':
+                    return
+                dirs = dirs[1:]
             try:
                 for directory in dirs:
                     self.change_directory(directory)
