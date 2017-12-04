@@ -129,9 +129,9 @@ def find(name, source, priority=None) -> fsobjects.File:
     for file in source.content:
         if file.name == name:
             if priority is None or (
-                            priority == "directory" and file.is_directory
+                    priority == "directory" and file.is_directory
             ) or (
-                            priority == "file" and not file.is_directory):
+                    priority == "file" and not file.is_directory):
                 return file
             else:
                 file_found = file
@@ -230,6 +230,8 @@ class DirectoryBrowser:
                 if args == '/':
                     return
                 dirs = dirs[1:]
+                if dirs[-1] == "":
+                    dirs = dirs[:-1]
             try:
                 for directory in dirs:
                     self.change_directory(directory)
@@ -350,7 +352,7 @@ class DirectoryBrowser:
                 parse_ascii_string_replace_errors(0, len(bytes_parser))
         else:
             text = bytes_parser.parse_string(0, len(bytes_parser),
-                                         encoding=encoding)
+                                             encoding=encoding)
         print(text)
 
     @reg_command(_commands, "hex",
