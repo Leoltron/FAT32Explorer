@@ -209,11 +209,11 @@ class File:
 
     def _write_dates(self, file_info_entry):
         file_info_entry[14:14 + 4] = \
-            list(bytes_parsers.datetime_to_bytes(self.create_datetime))
-        file_info_entry[18:18 + 2] = list(
-            bytes_parsers.date_to_bytes(self.last_open_date))
+            bytes_parsers.datetime_to_bytes(self.create_datetime)
+        file_info_entry[18:18 + 2] = \
+            bytes_parsers.date_to_bytes(self.last_open_date)
         file_info_entry[22:22 + 4] = \
-            list(bytes_parsers.datetime_to_bytes(self.change_datetime))
+            bytes_parsers.datetime_to_bytes(self.change_datetime)
 
     def _write_size(self, file_info_entry):
         if not self.is_directory:

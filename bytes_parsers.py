@@ -31,10 +31,8 @@ class BytesParser:
 
     def parse_ascii_string_replace_errors(self, start, length,
                                           replacement='\u2592'):
-        result = ""
-        for byte in self.get_bytes(start, length):
-            result += chr(byte) if byte in range(128) else replacement
-        return result
+        return ''.join(chr(byte) if byte in range(128) else replacement
+                       for byte in self.get_bytes(start, length))
 
     def parse_time_date(self, start):
         parsed_time = self.parse_time(start)
@@ -120,18 +118,15 @@ def int_to_bytes(length, value, byteorder="little"):
 def datetime_to_bytes(date_time):
     date_bytes = date_to_bytes(date_time.date())
     time_bytes = time_to_bytes(date_time.time())
-
-    return date_bytes + time_bytes
-
-
-def time_to_bytes(time):
-    return int_to_bytes(2, int(time_to_bits(time),
-                               base=2), "little")
+    return time_bytes + date_bytes
 
 
-def date_to_bytes(date):
-    return int_to_bytes(2, int(date_to_bits(date),
-                               base=2), "little")
+def time_to_bytes(time_):
+    return int(time_to_bits(time_), 2).to_bytes(length=2, byteorder="little")
+
+
+def date_to_bytes(date_):
+    return int(date_to_bits(date_), 2).to_bytes(length=2, byteorder="little")
 
 
 def date_to_bits(date):
